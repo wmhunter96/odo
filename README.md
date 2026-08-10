@@ -1,33 +1,29 @@
 Odo
-A containerized self-hosted fuel tracker.
-Odo simplifies fuel tracking by using odometer and receipt photos as the starting point for logging fill-up data, replacing the need to manually keep a spreadsheet up to date.
+A containerized self-hosted fuel tracker for logging gas fill-up data.
+Odo uses odometer and receipt photos to simplify data entry and keep fuel records organized in one place.
 ---
 Features
 Core Features (MVP)
-Web UI for logging fuel fill-ups
-Upload an odometer photo
-Upload a receipt photo
-Review and edit logged data
-Save and organize fill-up records
-View previous fill-ups in one place
----
-Configuration
-Self-hosted and containerized
-Persistent storage for app data
-Configurable storage location for uploaded photos and records
+Log gas fill-up data
+Upload odometer photos
+Upload receipt photos
+Keep fill-up records organized in one place
 ---
 Planned Features
-Automatic data extraction from uploaded photos
-Fuel and mileage statistics
-Fill-up history and trends
-Data export
-Google Sheets integration
-Multiple vehicle support
+Automatic data extraction from odometer photos
+Automatic data extraction from gas receipts
+Reduce manual data entry
+Simple fill-up history and record management
 ---
 Goals
-Make logging a fill-up as easy as taking the two photos already captured at the pump
-Eliminate manual spreadsheet updates
-Keep fuel records simple, organized, and self-hosted
+Make logging gas fill-ups quick and easy
+Reduce the need for manual spreadsheet updates
+Keep fuel records in one self-hosted application
 ---
-Deployment
-Odo is designed to run as a containerized self-hosted application. Deployment instructions will be added as the project is packaged for Docker and Unraid.
+Deploying on Unraid
+Every push to `main` builds and publishes the image to `ghcr.io/wmhunter96/odo:latest` via GitHub Actions. An Unraid template is included so the container installs and updates through the normal Docker UI instead of hand-editing `docker-compose.yml`.
+One-time setup:
+On GitHub, go to the repo's Packages tab → `odo` package → Package settings → change visibility to Public. (Only needed once — GHCR packages default to private, and a private image needs a login secret on the Unraid side to pull.)
+On Unraid: Docker tab → Template Repositories → add `https://github.com/wmhunter96/Odo` → Save.
+Go to Apps (or Docker → Add Container → template dropdown) and select Odo. Adjust the container paths and settings to match your setup, then Apply.
+After that: any new push to `main` refreshes the `latest` tag on GHCR, and Unraid's normal container update check (Docker tab, or the Community Applications "Check for Updates") will offer the update — no manual pulling or compose edits needed.
