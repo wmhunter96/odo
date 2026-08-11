@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
 interface Props {
   prompt: string;
@@ -11,14 +11,21 @@ interface Props {
 export default function PhotoCapture({ prompt, glyph, onContinue, continueLabel = "Continue", busy }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const libraryInputRef = useRef<HTMLInputElement>(null);
+  // Counts nested dragenter/dragleave pairs so a drag over a child element
+  // (e.g. the preview <img>) doesn't flicker the highlight off.
+  const dragDepth = useRef(0);
 
-  function handlePick(e: ChangeEvent<HTMLInputElement>) {
-    const picked = e.target.files?.[0];
-    if (!picked) return;
+  function useFile(picked: File | null | undefined) {
+    if (!picked || !picked.type.startsWith("image/")) return;
     setFile(picked);
     setPreviewUrl(URL.createObjectURL(picked));
+  }
+
+  function handlePick(e: ChangeEvent<HTMLInputElement>) {
+    useFile(e.target.files?.[0]);
     e.target.value = "";
   }
 
@@ -28,20 +35,54 @@ export default function PhotoCapture({ prompt, glyph, onContinue, continueLabel 
     setPreviewUrl(null);
   }
 
+  function handleDragEnter(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes("Files")) return;
+    dragDepth.current += 1;
+    setIsDragging(true);
+  }
+
+  function handleDragOver(e: DragEvent<HTMLDivElement>) {
+    // Required for onDrop to fire at all -- browsers reject drops by default.
+    e.preventDefault();
+  }
+
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragging(false);
+  }
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragging(false);
+    const dropped = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+    useFile(dropped);
+  }
+
   return (
     <div className="capture-shell">
       <div className="capture-prompt">{prompt}</div>
 
-      {previewUrl ? (
-        <div className="capture-preview">
-          <img src={previewUrl} alt="Captured preview" />
-        </div>
-      ) : (
-        <div className="capture-placeholder">
-          <span className="glyph">{glyph}</span>
-          <span>No photo yet</span>
-        </div>
-      )}
+      <div
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {previewUrl ? (
+          <div className={`capture-preview${isDragging ? " drag-active" : ""}`}>
+            <img src={previewUrl} alt="Captured preview" />
+          </div>
+        ) : (
+          <div className={`capture-placeholder${isDragging ? " drag-active" : ""}`}>
+            <span className="glyph">{glyph}</span>
+            <span>{isDragging ? "Drop photo here" : "No photo yet"}</span>
+            <span className="capture-placeholder-hint">or drag and drop an image</span>
+          </div>
+        )}
+      </div>
 
       <input
         ref={cameraInputRef}
