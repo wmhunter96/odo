@@ -130,7 +130,7 @@ Odo is a first-class Unraid target — it's a normal single container with one b
 
 **Option A — Template repository (recommended):**
 
-1. **Docker** tab → **Template Repositories** → add `https://github.com/wmhunter96/Odo` → **Save**.
+1. **Docker** tab → **Template Repositories** → add `https://github.com/wmhunter96/odo` → **Save**.
 2. Go to **Apps** (or **Docker** → **Add Container** → template dropdown) and select **Odo**.
 3. Confirm the fields below, then **Apply**.
 
