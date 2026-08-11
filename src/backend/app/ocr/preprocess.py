@@ -69,8 +69,9 @@ def deskew(img: Image.Image) -> Image.Image:
 
 
 def grayscale_contrast(img: Image.Image) -> Image.Image:
-    """Grayscale + adaptive contrast boost + light denoise. This is the
-    variant fed to Tesseract for both odometer and receipt images."""
+    """Grayscale + adaptive contrast boost + light denoise. Suited to
+    photos of illuminated dashboard displays: uneven lighting, glare, and
+    a colored background behind the digits."""
     mat = _to_cv(img)
     gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
     gray = cv2.fastNlMeansDenoising(gray, h=10)
@@ -79,10 +80,28 @@ def grayscale_contrast(img: Image.Image) -> Image.Image:
     return Image.fromarray(gray)
 
 
-def prepare_for_ocr(data: bytes) -> Image.Image:
-    """Full pipeline: load -> orient -> downscale -> deskew -> grayscale/contrast."""
+def binarize_for_receipt(img: Image.Image) -> Image.Image:
+    """Grayscale + adaptive threshold to pure black/white. Printed (often
+    thermal) receipts are small, dense text on an already high-contrast
+    background -- CLAHE tends to blotch that print into gray mush, while
+    binarization is the standard, much more reliable preprocessing for
+    Tesseract on document/receipt text."""
+    mat = _to_cv(img)
+    gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
+    gray = cv2.fastNlMeansDenoising(gray, h=7)
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
+    )
+    return Image.fromarray(thresh)
+
+
+def prepare_for_ocr(data: bytes, mode: str = "odometer") -> Image.Image:
+    """Full pipeline: load -> orient -> downscale -> deskew -> mode-specific
+    contrast handling. `mode` is "odometer" (dashboard display) or
+    "receipt" (printed text)."""
     img = load_image(data)
     img = downscale(img)
     img = deskew(img)
-    img = grayscale_contrast(img)
-    return img
+    if mode == "receipt":
+        return binarize_for_receipt(img)
+    return grayscale_contrast(img)

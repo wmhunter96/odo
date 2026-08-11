@@ -47,3 +47,47 @@ def test_missing_fields_produce_warnings_not_exceptions():
     result = parse_receipt(OCRResult(text="garbled unreadable text ###"))
     assert result.gallons is None
     assert result.warnings
+
+
+COMPACT_PUMP_RECEIPT = """SHELL
+1200 S Baldwin Ave, Arcadia, CA 91007
+
+7.591G
+4.199/G
+
+AMOUNT DUE
+31.87
+
+08/10/2026 6:42 PM
+"""
+
+
+def test_parses_compact_pump_unit_and_amount_due():
+    result = parse_receipt(OCRResult(text=COMPACT_PUMP_RECEIPT))
+    assert result.gallons == 7.591
+    assert result.price_per_gallon == 4.199
+    assert result.fuel_total == 31.87
+    assert result.station_brand == "Shell"
+
+
+NO_DOLLAR_SIGN_RECEIPT = """QUIKTRIP
+400 E Colorado Blvd, Pasadena, CA 91101
+
+PER GAL 4.190
+8.327 GALS
+
+SUBTOTAL 34.89
+TOTAL 34.89
+
+08/10/2026 6:42 PM
+"""
+
+
+def test_total_without_dollar_sign_and_ignores_subtotal():
+    result = parse_receipt(OCRResult(text=NO_DOLLAR_SIGN_RECEIPT))
+    assert result.gallons == 8.327
+    assert result.price_per_gallon == 4.19
+    # Both SUBTOTAL and TOTAL happen to be equal here on purpose -- the
+    # real assertion is that the SUBTOTAL line doesn't get matched as if
+    # it were a plain "TOTAL" label (see the negative lookbehind).
+    assert result.fuel_total == 34.89

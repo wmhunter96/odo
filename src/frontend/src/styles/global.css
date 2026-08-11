@@ -631,6 +631,20 @@ img {
   margin: 0 0 12px;
 }
 
+.ocr-raw-text {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+}
+
 .theme-toggle-group {
   display: flex;
   gap: 8px;

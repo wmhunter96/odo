@@ -35,23 +35,31 @@ KNOWN_BRANDS = [
 # line, and \s* would happily "match" across that line break onto the
 # wrong number.
 _GALLON_PATTERNS = [
-    re.compile(r"(\d{1,2}\.\d{2,3})[ \t]*(?:GAL(?:LONS)?)\b", re.IGNORECASE),
+    re.compile(r"(\d{1,2}\.\d{2,4})[ \t]*(?:GAL(?:LONS?|S)?)\b", re.IGNORECASE),
     # Negative lookbehind for "/" excludes "PRICE/GAL" style labels, which
     # contain the substring "GAL" but describe price-per-gallon, not gallons.
-    re.compile(r"(?<!/)\bGAL(?:LONS)?\b[ \t]*[:\-]?[ \t]*\$?[ \t]*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
+    re.compile(r"(?<!/)\bGAL(?:LONS?|S)?\b[ \t]*[:\-]?[ \t]*\$?[ \t]*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
+    # Compact single-letter unit some pumps print, e.g. "7.591G".
+    re.compile(r"(\d{1,2}\.\d{2,4})[ \t]*G\b", re.IGNORECASE),
 ]
 
 _PRICE_PER_GAL_PATTERNS = [
-    re.compile(r"\$?\s*(\d{1,2}\.\d{2,3})\s*/\s*GAL", re.IGNORECASE),
-    re.compile(r"PRICE\s*/?\s*GAL(?:LON)?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
-    re.compile(r"PPG\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
-    re.compile(r"@\s*\$?\s*(\d{1,2}\.\d{2,3})\s*/?\s*(?:GAL)?", re.IGNORECASE),
+    re.compile(r"\$?\s*(\d{1,2}\.\d{2,4})\s*/\s*(?:GAL(?:LON)?|G)\b", re.IGNORECASE),
+    re.compile(r"PRICE\s*/?\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
+    re.compile(r"PER\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
+    re.compile(r"PPG\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
+    re.compile(r"@\s*\$?\s*(\d{1,2}\.\d{2,4})\s*/?\s*(?:GAL)?", re.IGNORECASE),
 ]
 
 _TOTAL_PATTERNS = [
     re.compile(r"FUEL\s*TOTAL\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
-    re.compile(r"\bTOTAL\s*(?:SALE|DUE|AMOUNT)?\s*[:\-]?\s*\$\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
-    re.compile(r"AMOUNT\s*[:\-]?\s*\$\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"PUMP\s*TOTAL\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"AMOUNT\s*DUE\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"BALANCE\s*(?:DUE)?\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    # "SUB TOTAL"/"SUBTOTAL" is excluded by requiring TOTAL not be preceded
+    # by "SUB " (either as one word, which \b already blocks, or as two).
+    re.compile(r"(?<!SUB )\bTOTAL\s*(?:SALE|DUE|AMOUNT)?\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"\bAMOUNT\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
 ]
 
 _DATE_TOKEN_RE = re.compile(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b")

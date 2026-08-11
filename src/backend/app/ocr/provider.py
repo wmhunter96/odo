@@ -33,7 +33,13 @@ class OCRProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def read(self, image: Image.Image) -> OCRResult:
+    def read(self, image: Image.Image, config: str = "") -> OCRResult:
         """Run OCR on a preprocessed PIL image and return raw text plus
-        word-level boxes/confidences where the engine supports it."""
+        word-level boxes/confidences where the engine supports it.
+
+        `config` is passed through to the underlying engine verbatim (e.g.
+        Tesseract page-segmentation-mode flags) so callers can tune it per
+        image type without the provider interface knowing what "receipt"
+        or "odometer" mean.
+        """
         raise NotImplementedError

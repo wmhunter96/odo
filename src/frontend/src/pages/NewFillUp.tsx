@@ -273,6 +273,26 @@ export default function NewFillUp() {
 
       {errorMsg && <WarningBanner message={errorMsg} />}
 
+      {ocr && (ocr.odometer_raw_text || ocr.receipt_raw_text) && (
+        <details className="card" style={{ fontSize: "0.8rem" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 700 }}>Raw OCR text</summary>
+          <div style={{ marginTop: 10, color: "var(--text-muted)" }}>
+            If a field above looks wrong, this is exactly what OCR read from each photo —
+            useful for spotting why a value didn't extract correctly.
+          </div>
+          <div className="field-row" style={{ marginTop: 10 }}>
+            <div>
+              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Odometer photo</label>
+              <pre className="ocr-raw-text">{ocr.odometer_raw_text || "(no text found)"}</pre>
+            </div>
+            <div>
+              <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>Receipt photo</label>
+              <pre className="ocr-raw-text">{ocr.receipt_raw_text || "(no text found)"}</pre>
+            </div>
+          </div>
+        </details>
+      )}
+
       <div style={{ marginTop: 16 }}>
         <button className="btn btn-primary btn-block btn-lg" onClick={handleSave} disabled={saving}>
           {saving ? "Saving…" : "✓ Looks Good"}

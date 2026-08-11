@@ -11,14 +11,14 @@ class TesseractProvider(OCRProvider):
 
     name = "tesseract"
 
-    def read(self, image: Image.Image) -> OCRResult:
+    def read(self, image: Image.Image, config: str = "") -> OCRResult:
         import pytesseract
 
-        text = pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image, config=config)
 
         words: list[OCRWord] = []
         try:
-            data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+            data = pytesseract.image_to_data(image, config=config, output_type=pytesseract.Output.DICT)
             n = len(data.get("text", []))
             for i in range(n):
                 token = (data["text"][i] or "").strip()

@@ -50,12 +50,15 @@ async def process_ocr(
     previous_odometer = recent[-1].odometer if recent else None
     historical_mpgs = [a.mpg for a in calculations.annotate_sequence(recent) if a.mpg is not None]
 
-    odo_img = prepare_for_ocr(odometer_bytes)
+    odo_img = prepare_for_ocr(odometer_bytes, mode="odometer")
     odo_ocr = provider.read(odo_img)
     odo_result = parse_odometer(odo_ocr, previous_odometer=previous_odometer)
 
-    receipt_img = prepare_for_ocr(receipt_bytes)
-    receipt_ocr = provider.read(receipt_img)
+    # --psm 6 ("assume a single uniform block of text") is the standard
+    # Tesseract tuning for receipts -- the default full-page-layout mode
+    # (psm 3) tends to fragment/drop short, tightly-spaced receipt lines.
+    receipt_img = prepare_for_ocr(receipt_bytes, mode="receipt")
+    receipt_ocr = provider.read(receipt_img, config="--psm 6")
     receipt_result = parse_receipt(receipt_ocr)
 
     gallons, price_per_gallon, fuel_total = validation.derive_missing_fuel_value(
