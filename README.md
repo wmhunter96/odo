@@ -141,7 +141,7 @@ Odo is a first-class Unraid target — it's a normal single container with one b
 | Field | Value |
 | --- | --- |
 | Repository | `ghcr.io/wmhunter96/odo:latest` |
-| Icon URL | `https://raw.githubusercontent.com/wmhunter96/odo/main/unraid/icon.png` |
+| Icon URL | `https://raw.githubusercontent.com/wmhunter96/odo/main/unraid/icon.png?v=2` |
 | Web UI Port | `8080` |
 | Path: Container | `/data` |
 | Path: Host | `/mnt/user/appdata/odo` |
@@ -152,6 +152,13 @@ Odo is a first-class Unraid target — it's a normal single container with one b
 One-time setup for a private GHCR image: on GitHub, go to the repo's **Packages** tab → `odo` package → **Package settings** → set visibility to **Public** (only needed once — GHCR packages default to private, and a private image needs a login secret on the Unraid side to pull).
 
 The Unraid template XML is included at [`unraid/odo.xml`](unraid/odo.xml).
+
+> **Updating the app icon:** Unraid fetches the `<Icon>` URL once and caches it locally, keyed by
+> that exact URL string — pushing a new `unraid/icon.png` to GitHub does *not* make Unraid refetch
+> it (`raw.githubusercontent.com` itself updates immediately; this is purely an Unraid-side cache).
+> To force a refresh, bump the `?v=N` query parameter on the `<Icon>` URL in `unraid/odo.xml` (and
+> in the table above) any time `icon.png` actually changes — a different URL is a cache miss by
+> definition, regardless of Unraid's internal caching.
 
 ## Updating
 
