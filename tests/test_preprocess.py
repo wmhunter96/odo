@@ -39,13 +39,33 @@ def test_crop_to_receipt_finds_and_flattens_a_rotated_receipt():
     assert mean_brightness > 240
 
 
-def test_crop_to_receipt_falls_back_to_original_when_no_outline_found():
-    # A flat, featureless image has no quadrilateral to detect -- cropping
-    # blind here would risk cutting into real content, so it must be a
-    # no-op instead.
-    blank = Image.new("RGB", (400, 300), (128, 128, 128))
-    result = crop_to_receipt(blank)
-    assert result.size == blank.size
+def test_crop_to_receipt_falls_back_when_nothing_is_actually_bright():
+    # Otsu always finds *some* split, even here -- roughly half of this
+    # uniformly dim, textured scene will threshold as the "bright" side.
+    # Without an absolute-brightness floor, that relatively-brighter half
+    # would get confidently (and wrongly) cropped as if it were a receipt.
+    rng = np.random.default_rng(0)
+    dim_textured = rng.integers(90, 140, size=(300, 400), dtype=np.uint8)
+    photo = Image.fromarray(dim_textured).convert("RGB")
+    result = crop_to_receipt(photo)
+    assert result.size == photo.size
+
+
+def test_crop_to_receipt_handles_a_textured_background():
+    # Mirrors a receipt draped over patterned fabric rather than laid on a
+    # plain desk: a bright rectangle over a noisy, moderately-lit backdrop
+    # (not dark enough to trip the earlier "nothing found" tests) should
+    # still be detected as the dominant bright region.
+    rng = np.random.default_rng(1)
+    noise = rng.integers(60, 150, size=(800, 800), dtype=np.uint8)
+    canvas = Image.fromarray(noise).convert("RGB")
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([250, 150, 550, 650], fill=(255, 255, 255))  # 300x500, axis-aligned
+
+    cropped = crop_to_receipt(canvas)
+    assert cropped.size != canvas.size
+    assert cropped.size[0] == pytest.approx(300, abs=5)
+    assert cropped.size[1] == pytest.approx(500, abs=5)
 
 
 def test_crop_to_receipt_ignores_small_contours():

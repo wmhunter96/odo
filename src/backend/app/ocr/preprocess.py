@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 MAX_DIMENSION = 2200
+MIN_RECEIPT_DIMENSION = 1200
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -29,6 +30,19 @@ def downscale(img: Image.Image, max_dimension: int = MAX_DIMENSION) -> Image.Ima
     if longest <= max_dimension:
         return img
     scale = max_dimension / longest
+    return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+
+
+def upscale_if_small(img: Image.Image, min_dimension: int = MIN_RECEIPT_DIMENSION) -> Image.Image:
+    """Cropping tightly to a receipt (crop_to_receipt) often leaves the
+    fine thermal print smaller, in pixels, than reliable OCR wants --
+    upscale (never downscale) so the longest side is at least
+    min_dimension before binarizing."""
+    w, h = img.size
+    longest = max(w, h)
+    if longest >= min_dimension:
+        return img
+    scale = min_dimension / longest
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
 
 
@@ -96,53 +110,79 @@ def _four_point_transform(mat: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
 
 def crop_to_receipt(img: Image.Image) -> Image.Image:
-    """Find the receipt's outline against its background and
-    perspective-correct/crop to just that region, so OCR sees the receipt
-    instead of the desk/hand/background around it. This also makes a
-    separate rotation-only deskew pass unnecessary for receipts -- the
-    perspective warp corrects orientation as part of flattening it.
+    """Find the receipt against its background and crop tightly to it,
+    straightening out any rotation, so OCR sees the receipt itself instead
+    of it as a small part of a much larger, busier photo (a desk, a hand,
+    a car seat/pants leg, ...).
 
-    Falls back to the original, uncropped image whenever detection isn't
-    confident (no clear 4-sided contour large enough to plausibly be the
-    receipt) rather than risk cropping into the receipt itself.
+    Deliberately brightness-based rather than edge-based: a receipt held
+    or draped in a photo is rarely a flat, perfectly planar quadrilateral
+    (thermal paper curls, gets bent/creased), and its own printed text
+    creates a lot of internal edges. Edge detection + "find a clean
+    4-sided contour" is fragile against that -- it tends to either latch
+    onto a piece of the background or find nothing and silently give up.
+    Segmenting by brightness (receipts are bright paper; most real
+    backgrounds -- desks, hands, clothing -- are comparatively darker/more
+    textured) is far more forgiving of a curled, non-planar receipt.
+
+    The detected region is cropped with a plain rotation (via its rotated
+    bounding box), not a full perspective warp: warping a curved surface
+    flat would introduce its own distortion, which could easily make
+    already-marginal OCR worse rather than better.
+
+    Falls back to the original, uncropped image whenever no sufficiently
+    large bright region is found, rather than risk cropping into content.
     """
     mat = _to_cv(img)
     h, w = mat.shape[:2]
+    image_area = w * h
 
     gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 50, 150)
-    edged = cv2.dilate(edged, None, iterations=2)
-    edged = cv2.erode(edged, None, iterations=1)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Close over the receipt's own text/creases so it reads as one solid
+    # blob, then strip small bright specks (glare, light background patches).
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return img
 
-    image_area = w * h
-    candidates = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
-
-    best_quad = None
-    for c in candidates:
-        # A receipt should dominate a reasonably tightly-framed photo of
-        # it; smaller contours are more likely noise/background clutter.
-        if cv2.contourArea(c) < image_area * 0.2:
-            continue
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4:
-            best_quad = approx.reshape(4, 2).astype("float32")
-            break
-
-    if best_quad is None:
+    largest = max(contours, key=cv2.contourArea)
+    # A handheld/draped receipt often occupies well under half the frame
+    # once there's margin for safety -- 8% is a low enough bar to still
+    # reject "the whole photo happened to threshold bright" false positives.
+    if cv2.contourArea(largest) < image_area * 0.08:
         return img
 
+    # Otsu always finds *some* split, even in a photo with no receipt at
+    # all -- it'll happily call the relatively-brighter half of a
+    # uniformly dim background "foreground". Requiring the detected region
+    # to actually be bright in absolute terms (real paper, well-lit, reads
+    # ~200+) guards against confidently cropping to the wrong thing.
+    region_mask = np.zeros(gray.shape, dtype=np.uint8)
+    cv2.drawContours(region_mask, [largest], -1, 255, thickness=cv2.FILLED)
+    if cv2.mean(gray, mask=region_mask)[0] < 170:
+        return img
+
+    rect = cv2.minAreaRect(largest)
+    (_, _), (rect_w, rect_h), _ = rect
+    if min(rect_w, rect_h) < 20:
+        return img
+
+    box = cv2.boxPoints(rect).astype("float32")
     try:
-        warped = _four_point_transform(mat, best_quad)
+        # boxPoints is always a true rectangle (just possibly rotated), so
+        # warping its corners to an axis-aligned target is a pure rotation
+        # + crop, not a distorting perspective transform.
+        cropped = _four_point_transform(mat, box)
     except (ValueError, cv2.error):
         return img
 
-    return _to_pil(warped)
+    return _to_pil(cropped)
 
 
 def grayscale_contrast(img: Image.Image) -> Image.Image:
@@ -178,14 +218,16 @@ def prepare_for_ocr(data: bytes, mode: str = "odometer") -> Image.Image:
 
         odometer: load -> orient -> downscale -> rotation-only deskew ->
                   contrast boost
-        receipt:  load -> orient -> downscale -> find & crop to the
-                  receipt's outline (also corrects perspective/rotation
-                  as part of flattening it) -> binarize
+        receipt:  load -> orient -> downscale -> crop to the receipt's
+                  outline (also corrects rotation as part of that) ->
+                  upscale back up if the crop left the print small ->
+                  binarize
     """
     img = load_image(data)
     img = downscale(img)
     if mode == "receipt":
         img = crop_to_receipt(img)
+        img = upscale_if_small(img)
         return binarize_for_receipt(img)
     img = deskew(img)
     return grayscale_contrast(img)
