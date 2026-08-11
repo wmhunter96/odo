@@ -62,8 +62,15 @@ _TOTAL_PATTERNS = [
     re.compile(r"\bAMOUNT\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
 ]
 
-_DATE_TOKEN_RE = re.compile(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b")
-_TIME_TOKEN_RE = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.?\b")
+# No leading \b: OCR frequently glues a stray misread character straight
+# onto a leading digit with no real word boundary between them (e.g. "01"
+# misread as "a1", butted against nothing but the digits that follow), and
+# the trailing "\b" plus the literal "/"/":" separators are already
+# distinctive enough on their own to not need it. Optional whitespace
+# around the separators for the same reason -- OCR sometimes inserts a
+# stray space next to a misread character (e.g. "a1 /24/2026").
+_DATE_TOKEN_RE = re.compile(r"\d{1,2}\s*[/\-]\s*\d{1,2}\s*[/\-]\s*\d{2,4}\b")
+_TIME_TOKEN_RE = re.compile(r"\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\s*[AaPp]\.?[Mm]\.?\b")
 
 _ADDRESS_FULL_RE = re.compile(
     r"\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}?,\s*[A-Za-z.\- ]{2,30},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?"
@@ -124,14 +131,16 @@ def _extract_datetime(text: str) -> datetime | None:
     if not date_match:
         return None
     time_match = _TIME_TOKEN_RE.search(text)
-    combined = date_match.group(0)
+    # Strip whitespace the token regexes deliberately tolerated around
+    # separators (see their comments) before handing off to dateutil.
+    combined = re.sub(r"\s+", "", date_match.group(0))
     if time_match:
-        combined = f"{combined} {time_match.group(0)}"
+        combined = f"{combined} {re.sub(r'\\s+', '', time_match.group(0))}"
     try:
         return dateparser.parse(combined)
     except (ValueError, OverflowError):
         try:
-            return dateparser.parse(date_match.group(0))
+            return dateparser.parse(re.sub(r"\s+", "", date_match.group(0)))
         except (ValueError, OverflowError):
             return None
 
@@ -154,10 +163,11 @@ def parse_receipt(result: OCRResult) -> ReceiptResult:
         raw_text=text,
     )
 
-    if gallons is None:
-        r.warnings.append("Could not find gallons on the receipt.")
-    if fuel_total is None and price_per_gallon is None:
-        r.warnings.append("Could not find a fuel total or price per gallon on the receipt.")
+    # Deliberately NOT warning about missing gallons/price/total here --
+    # whether one of those three is genuinely missing or just derivable
+    # from the other two depends on derive_missing_fuel_value(), which
+    # this module doesn't call (see the module docstring). That decision,
+    # and the resulting message, belongs to the caller (routes/ocr.py).
     if r.timestamp is None:
         r.warnings.append("Could not find a transaction date/time on the receipt.")
 

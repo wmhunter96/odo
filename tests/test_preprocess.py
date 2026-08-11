@@ -29,9 +29,11 @@ def test_crop_to_receipt_finds_and_flattens_a_rotated_receipt():
 
     # Perspective correction should recover roughly the original
     # (unrotated) receipt dimensions, not the photo's full 800x800 frame.
+    # A small edge margin (~4% x / ~1% y) is deliberately trimmed off on
+    # top of that -- see _trim_margin -- so the expected size accounts for it.
     assert cropped.size != photo.size
-    assert cropped.size[0] == pytest.approx(expected_w, abs=3)
-    assert cropped.size[1] == pytest.approx(expected_h, abs=3)
+    assert cropped.size[0] == pytest.approx(expected_w * 0.92, abs=5)
+    assert cropped.size[1] == pytest.approx(expected_h * 0.98, abs=5)
 
     # The crop should be (almost) entirely the white receipt, not the dark
     # background that surrounded it in the original photo.
@@ -64,8 +66,8 @@ def test_crop_to_receipt_handles_a_textured_background():
 
     cropped = crop_to_receipt(canvas)
     assert cropped.size != canvas.size
-    assert cropped.size[0] == pytest.approx(300, abs=5)
-    assert cropped.size[1] == pytest.approx(500, abs=5)
+    assert cropped.size[0] == pytest.approx(300 * 0.92, abs=8)
+    assert cropped.size[1] == pytest.approx(500 * 0.98, abs=8)
 
 
 def test_crop_to_receipt_ignores_small_contours():

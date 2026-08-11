@@ -87,6 +87,39 @@ def derive_missing_fuel_value(
     return gallons, price_per_gallon, fuel_total
 
 
+_FUEL_FIELD_LABELS = (
+    ("gallons", "Gallons"),
+    ("price_per_gallon", "Price/Gal"),
+    ("fuel_total", "Fuel Total"),
+)
+
+
+def fuel_field_warnings(
+    original: dict[str, float | None], final: dict[str, float | None]
+) -> list[str]:
+    """Per-field messaging for gallons/price_per_gallon/fuel_total, given
+    what the receipt parser originally read (`original`, pre-derivation)
+    versus the values after derive_missing_fuel_value() ran (`final`).
+
+    A field that was missing but got filled in by derivation is a
+    different (better -- calculated, not guessed) situation than one
+    that's still genuinely missing, so each gets its own message rather
+    than a blanket "couldn't find X" sitting next to an actually-filled-in
+    value.
+    """
+    warnings_out = []
+    for field, label in _FUEL_FIELD_LABELS:
+        if original.get(field) is not None:
+            continue
+        if final.get(field) is not None:
+            warnings_out.append(
+                f"{label} wasn't directly readable on the receipt -- calculated from the other two values instead."
+            )
+        else:
+            warnings_out.append(f"Could not find {label} on the receipt.")
+    return warnings_out
+
+
 def find_duplicates(
     candidate: dict,
     recent_fillups: list,

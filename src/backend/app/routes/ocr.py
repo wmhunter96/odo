@@ -70,15 +70,26 @@ async def process_ocr(
     mpg = derived.mpg if odo_result.value is not None else None
     cpm = derived.cost_per_mile if odo_result.value is not None else None
 
+    fuel_warnings = validation.fuel_field_warnings(
+        original={
+            "gallons": receipt_result.gallons,
+            "price_per_gallon": receipt_result.price_per_gallon,
+            "fuel_total": receipt_result.fuel_total,
+        },
+        final={"gallons": gallons, "price_per_gallon": price_per_gallon, "fuel_total": fuel_total},
+    )
+
     warnings = WarningsOut(
         odometer=validation.check_odometer(previous_odometer, odo_result.value) if odo_result.value is not None else None,
         mpg=validation.check_mpg(mpg, historical_mpgs),
         fuel_math=validation.check_fuel_math(gallons, price_per_gallon, fuel_total),
-        # These come straight from the parser (e.g. "couldn't find gallons
-        # on the receipt at all") -- surfacing them is what makes a
-        # silently-defaulted field (like today's date/time when no
-        # timestamp was found) visibly different from an actually-read one.
-        receipt_fields=receipt_result.warnings,
+        # fuel_warnings covers gallons/price/total, distinguishing "found
+        # directly" / "derived from the other two" / "still missing".
+        # receipt_result.warnings covers date/time, which has no such
+        # derivation fallback. Surfacing these is what makes a
+        # silently-defaulted field (like today's date when none was found)
+        # visibly different from an actually-read one.
+        receipt_fields=fuel_warnings + receipt_result.warnings,
     )
 
     candidate = {

@@ -14,7 +14,12 @@ import numpy as np
 from PIL import Image, ImageOps
 
 MAX_DIMENSION = 2200
-MIN_RECEIPT_DIMENSION = 1200
+# Tuned against a real photographed thermal receipt (not just synthetic
+# test images): too little upscaling leaves fine dot-matrix print soft,
+# too much over-smooths it during binarization and starts flipping
+# similar-shaped digits (e.g. 1/7, 8/9) -- 1200px wide was the most
+# reliably correct point tested (500-1600px) for this font/resolution.
+MIN_RECEIPT_WIDTH = 1200
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -33,17 +38,32 @@ def downscale(img: Image.Image, max_dimension: int = MAX_DIMENSION) -> Image.Ima
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
 
 
-def upscale_if_small(img: Image.Image, min_dimension: int = MIN_RECEIPT_DIMENSION) -> Image.Image:
+def upscale_if_small(img: Image.Image, min_width: int = MIN_RECEIPT_WIDTH) -> Image.Image:
     """Cropping tightly to a receipt (crop_to_receipt) often leaves the
-    fine thermal print smaller, in pixels, than reliable OCR wants --
-    upscale (never downscale) so the longest side is at least
-    min_dimension before binarizing."""
+    fine print narrower, in pixels, than reliable OCR wants -- upscale
+    (never downscale) so the width is at least min_width before binarizing.
+    Targets width specifically, not the longest side: a receipt's width is
+    the tighter constraint on individual character size, since it's
+    normally photographed as one long column of text."""
     w, h = img.size
-    longest = max(w, h)
-    if longest >= min_dimension:
+    if w >= min_width:
         return img
-    scale = min_dimension / longest
+    scale = min_width / w
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+
+
+def _trim_margin(img: Image.Image, x_pct: float = 0.04, y_pct: float = 0.01) -> Image.Image:
+    """Shave a small margin off each edge of a crop. Even a well-fit
+    detected outline can carry a sliver of background right at the
+    boundary (an imprecise contour edge, a bit of textured background
+    bleeding in) that's enough to throw off OCR's line segmentation --
+    trimming a few percent removes that without meaningfully cutting into
+    the receipt itself, whose own margins are blank anyway."""
+    w, h = img.size
+    dx, dy = int(w * x_pct), int(h * y_pct)
+    if w - 2 * dx < 20 or h - 2 * dy < 20:
+        return img
+    return img.crop((dx, dy, w - dx, h - dy))
 
 
 def _to_cv(img: Image.Image) -> np.ndarray:
@@ -141,11 +161,19 @@ def crop_to_receipt(img: Image.Image) -> Image.Image:
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
-    # Close over the receipt's own text/creases so it reads as one solid
-    # blob, then strip small bright specks (glare, light background patches).
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # Order matters here. OPEN first strips thin bright structures --
+    # crucially, things like a corduroy/textured background's raised
+    # ridges catching light as thin streaks -- while they're still
+    # separate blobs from the receipt. CLOSE second then fills in the
+    # receipt's own internal gaps (text, creases) into one solid blob.
+    # Doing this the other way around (close before open, as this used to)
+    # lets those thin background streaks bridge straight into the receipt
+    # before opening ever gets a chance to strip them, which was merging
+    # in ~20%+ of extra background as if it were part of the receipt.
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
@@ -182,7 +210,7 @@ def crop_to_receipt(img: Image.Image) -> Image.Image:
     except (ValueError, cv2.error):
         return img
 
-    return _to_pil(cropped)
+    return _trim_margin(_to_pil(cropped))
 
 
 def grayscale_contrast(img: Image.Image) -> Image.Image:

@@ -29,6 +29,32 @@ def test_derive_missing_price_per_gallon():
     assert price == pytest.approx(37.50 / 8.411, abs=1e-3)
 
 
+def test_fuel_field_warnings_distinguishes_derived_from_still_missing():
+    # Real case: OCR read price + total but not gallons directly; gallons
+    # then gets filled in by derive_missing_fuel_value().
+    original = {"gallons": None, "price_per_gallon": 3.899, "fuel_total": 21.14}
+    final = {"gallons": 5.422, "price_per_gallon": 3.899, "fuel_total": 21.14}
+    warnings = validation.fuel_field_warnings(original, final)
+    assert len(warnings) == 1
+    assert "calculated from the other two" in warnings[0]
+    assert "Gallons" in warnings[0]
+
+
+def test_fuel_field_warnings_reports_genuinely_missing_field():
+    # Only one value known -- derive_missing_fuel_value() can't fill
+    # anything in, so both remaining fields are still genuinely missing.
+    original = {"gallons": 8.411, "price_per_gallon": None, "fuel_total": None}
+    final = {"gallons": 8.411, "price_per_gallon": None, "fuel_total": None}
+    warnings = validation.fuel_field_warnings(original, final)
+    assert len(warnings) == 2
+    assert all("Could not find" in w for w in warnings)
+
+
+def test_fuel_field_warnings_empty_when_everything_read_directly():
+    values = {"gallons": 8.411, "price_per_gallon": 4.459, "fuel_total": 37.50}
+    assert validation.fuel_field_warnings(values, values) == []
+
+
 def test_derive_missing_total():
     gallons, price, total = validation.derive_missing_fuel_value(8.411, 4.459, None)
     assert total == pytest.approx(8.411 * 4.459, abs=0.01)
