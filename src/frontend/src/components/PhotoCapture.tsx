@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
 interface Props {
   prompt: string;
@@ -17,6 +17,14 @@ export default function PhotoCapture({ prompt, glyph, onContinue, continueLabel 
   // Counts nested dragenter/dragleave pairs so a drag over a child element
   // (e.g. the preview <img>) doesn't flicker the highlight off.
   const dragDepth = useRef(0);
+
+  // Revoke the blob URL when this step is torn down (e.g. remounted with a
+  // new `key` for the next step) instead of only on an explicit Retake.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   function useFile(picked: File | null | undefined) {
     if (!picked || !picked.type.startsWith("image/")) return;

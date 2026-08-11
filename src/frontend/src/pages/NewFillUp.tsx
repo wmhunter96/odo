@@ -119,7 +119,7 @@ export default function NewFillUp() {
     return (
       <div>
         <StepDots current={0} />
-        <PhotoCapture prompt="Take Odometer Photo" glyph="🚗" onContinue={handleOdometerContinue} />
+        <PhotoCapture key="odometer-capture" prompt="Take Odometer Photo" glyph="🚗" onContinue={handleOdometerContinue} />
       </div>
     );
   }
@@ -129,6 +129,7 @@ export default function NewFillUp() {
       <div>
         <StepDots current={1} />
         <PhotoCapture
+          key="receipt-capture"
           prompt="Take Receipt Photo"
           glyph="🧾"
           onContinue={handleReceiptContinue}
