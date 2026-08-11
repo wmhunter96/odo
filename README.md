@@ -141,6 +141,7 @@ Odo is a first-class Unraid target — it's a normal single container with one b
 | Field | Value |
 | --- | --- |
 | Repository | `ghcr.io/wmhunter96/odo:latest` |
+| Icon URL | `https://raw.githubusercontent.com/wmhunter96/odo/main/unraid/icon.png` |
 | Web UI Port | `8080` |
 | Path: Container | `/data` |
 | Path: Host | `/mnt/user/appdata/odo` |
