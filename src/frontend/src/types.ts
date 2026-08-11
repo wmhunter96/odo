@@ -48,6 +48,7 @@ export interface Warnings {
   odometer: string | null;
   mpg: string | null;
   fuel_math: string | null;
+  receipt_fields: string[];
 }
 
 export interface DuplicateCandidate {

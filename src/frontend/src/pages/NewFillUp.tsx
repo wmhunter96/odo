@@ -149,6 +149,9 @@ export default function NewFillUp() {
       {ocr?.warnings.odometer && <WarningBanner message={ocr.warnings.odometer} />}
       {ocr?.warnings.mpg && <WarningBanner message={ocr.warnings.mpg} />}
       {ocr?.warnings.fuel_math && <WarningBanner message={ocr.warnings.fuel_math} />}
+      {ocr?.warnings.receipt_fields.map((msg) => (
+        <WarningBanner key={msg} message={msg} />
+      ))}
 
       {ocr && ocr.duplicates.length > 0 && !dupesDismissed && (
         <div className="warning-banner" style={{ flexDirection: "column", alignItems: "stretch" }}>

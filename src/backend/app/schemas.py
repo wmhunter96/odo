@@ -69,6 +69,10 @@ class WarningsOut(BaseModel):
     odometer: str | None = None
     mpg: str | None = None
     fuel_math: str | None = None
+    # Field-level "couldn't find this on the receipt at all" notices from
+    # the parser itself (as opposed to the sanity checks above, which
+    # assume a value but think it looks wrong).
+    receipt_fields: list[str] = []
 
 
 class DuplicateCandidateOut(BaseModel):

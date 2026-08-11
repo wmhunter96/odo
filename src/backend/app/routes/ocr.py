@@ -74,6 +74,11 @@ async def process_ocr(
         odometer=validation.check_odometer(previous_odometer, odo_result.value) if odo_result.value is not None else None,
         mpg=validation.check_mpg(mpg, historical_mpgs),
         fuel_math=validation.check_fuel_math(gallons, price_per_gallon, fuel_total),
+        # These come straight from the parser (e.g. "couldn't find gallons
+        # on the receipt at all") -- surfacing them is what makes a
+        # silently-defaulted field (like today's date/time when no
+        # timestamp was found) visibly different from an actually-read one.
+        receipt_fields=receipt_result.warnings,
     )
 
     candidate = {
