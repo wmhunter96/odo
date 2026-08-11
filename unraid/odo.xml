@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Odo</Name>
+  <Repository>ghcr.io/wmhunter96/odo:latest</Repository>
+  <Registry>https://ghcr.io/wmhunter96/odo</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/wmhunter96/Odo/issues</Support>
+  <Project>https://github.com/wmhunter96/Odo</Project>
+  <Overview>Odo is a self-hosted fuel fill-up tracker. Take a photo of your odometer and a photo of your gas receipt and Odo turns them into a complete fill-up record using local OCR -- no cloud services, no subscriptions, no external database. Everything (SQLite database, photos, settings) lives under the single /data path so container updates/recreations never lose data.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/wmhunter96/Odo/main/src/frontend/public/icons/icon-512.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Port for the Odo web interface" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/odo" Mode="rw" Description="Persistent storage for the SQLite database, uploaded photos, and settings. Back up this path to back up all of Odo." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/odo</Config>
+  <Config Name="TZ" Target="TZ" Default="America/Chicago" Mode="" Description="Timezone used for 'this month' stats and displayed timestamps, e.g. America/Chicago" Type="Variable" Display="always" Required="false" Mask="false">America/Chicago</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID that will own files under /data (99 = nobody on Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID that will own files under /data (100 = users on Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

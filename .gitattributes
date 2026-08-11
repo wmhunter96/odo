@@ -1,0 +1,6 @@
+# Force LF line endings for anything that ends up executed inside the Linux
+# container, regardless of a contributor's local core.autocrlf setting.
+# Windows-checked-out CRLF shell scripts break with "bad interpreter".
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
