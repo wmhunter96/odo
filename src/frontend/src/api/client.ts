@@ -4,6 +4,7 @@ import type {
   DashboardStats,
   FillUp,
   FillUpUpdate,
+  Healthz,
   ImportPreview,
   LifetimeStats,
   OCRProcessResponse,
@@ -82,6 +83,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   backupInfo: () => request<Record<string, unknown>>("/api/settings/backup-info"),
+  healthz: () => request<Healthz>("/api/healthz"),
 
   photoUrl: (fillupId: number, kind: "odometer" | "receipt", thumbnail = false) =>
     `/api/fillups/${fillupId}/photo/${kind}${thumbnail ? "?thumbnail=true" : ""}`,

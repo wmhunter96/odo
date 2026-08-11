@@ -151,3 +151,10 @@ export interface AppSettings {
   timezone: string;
   ocr_engine: string;
 }
+
+export interface Healthz {
+  status: string;
+  version: string;
+  git_sha: string;
+  build_date: string;
+}

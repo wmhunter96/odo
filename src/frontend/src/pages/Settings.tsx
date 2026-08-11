@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { api } from "../api/client";
 import { useTheme } from "../context/ThemeContext";
-import type { AppSettings, ImportPreview, Vehicle } from "../types";
+import type { AppSettings, Healthz, ImportPreview, Vehicle } from "../types";
 
 const COMMON_TIMEZONES = [
   "UTC",
@@ -26,12 +26,14 @@ export default function Settings() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [backupInfo, setBackupInfo] = useState<Record<string, unknown> | null>(null);
+  const [health, setHealth] = useState<Healthz | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.getActiveVehicle().then(setVehicle);
     api.getSettings().then(setSettings);
     api.backupInfo().then(setBackupInfo).catch(() => {});
+    api.healthz().then(setHealth).catch(() => {});
   }, []);
 
   async function onTimezoneChange(tz: string) {
@@ -181,6 +183,30 @@ export default function Settings() {
             <option value="tesseract">Tesseract (local, CPU)</option>
           </select>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">About</div>
+        {health ? (
+          <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            <div>
+              Version <strong style={{ color: "var(--text)" }}>{health.version}</strong>
+            </div>
+            <div>
+              Build{" "}
+              <code style={{ color: "var(--text)" }}>
+                {health.git_sha === "unknown" ? "unknown (local/dev build)" : health.git_sha.slice(0, 7)}
+              </code>
+            </div>
+            {health.build_date !== "unknown" && <div>Built {new Date(health.build_date).toLocaleString()}</div>}
+            <div style={{ marginTop: 8 }}>
+              This is the single most reliable way to check whether a container update actually took
+              effect — it's read directly from the running server, not cached anywhere.
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Loading…</div>
+        )}
       </div>
     </div>
   );

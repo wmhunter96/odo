@@ -45,7 +45,14 @@ app.include_router(settings_routes.router)
 
 @app.get("/api/healthz")
 def healthz():
-    return JSONResponse({"status": "ok", "version": __version__})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": __version__,
+            "git_sha": settings.git_sha,
+            "build_date": settings.build_date,
+        }
+    )
 
 
 # --- Static frontend (PWA build) ---------------------------------------

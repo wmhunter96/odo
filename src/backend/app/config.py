@@ -25,6 +25,13 @@ class Settings:
         self.ocr_engine = os.environ.get("OCR_ENGINE", "tesseract")
         self.max_upload_mb = int(os.environ.get("MAX_UPLOAD_MB", "20"))
         self.thumbnail_max_px = int(os.environ.get("THUMBNAIL_MAX_PX", "480"))
+        # Baked into the image at build time (see Dockerfile /
+        # docker-publish.yml) so a running container can report exactly
+        # which commit it's built from -- the one unambiguous way to tell
+        # whether an update actually landed, independent of any URL/CDN/
+        # browser caching elsewhere (e.g. the Unraid template icon).
+        self.git_sha = os.environ.get("GIT_SHA", "unknown")
+        self.build_date = os.environ.get("BUILD_DATE", "unknown")
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

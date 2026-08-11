@@ -15,11 +15,21 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
+# Baked in at build time (see .github/workflows/docker-publish.yml) so a
+# running container can report exactly which commit it was built from via
+# /api/healthz -- otherwise there's no reliable way to tell whether an
+# Unraid container actually picked up a given push versus still running an
+# older image, short of guessing from behavior.
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
     STATIC_DIR=/app/static \
-    PORT=8080
+    PORT=8080 \
+    GIT_SHA=${GIT_SHA} \
+    BUILD_DATE=${BUILD_DATE}
 
 # tesseract-ocr: local, free, CPU-only OCR engine (no GPU, no network calls)
 # libgl1/libglib2.0-0: runtime libs required by opencv-python-headless
