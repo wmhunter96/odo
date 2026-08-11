@@ -1,0 +1,156 @@
+"""Extract gas-receipt fields from raw OCR text.
+
+Deliberately NOT built around any single station's receipt layout. Every
+field is found independently via a handful of regex patterns tried in
+priority order, so a receipt missing/garbling one field doesn't prevent the
+others from being extracted. Missing-value derivation (gallons * price =
+total) lives in validation.py, not here -- this module only reports what it
+actually found.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from dateutil import parser as dateparser
+
+from .provider import OCRResult
+
+# Common gas station brands, used to normalize noisy OCR text like
+# "COSTCO WHOLESALE #123" -> "Costco". Longest names first so e.g. "Phillips
+# 66" matches before a bare "66" would.
+KNOWN_BRANDS = [
+    "Costco", "Sam's Club", "Kwik Trip", "Kwik Star",
+    "Phillips 66", "Circle K", "Flying J", "Murphy USA", "Murphy Express",
+    "Love's", "Pilot", "QuikTrip", "RaceTrac", "Racetrack", "Speedway",
+    "Sheetz", "Wawa", "Casey's", "ExxonMobil", "Exxon", "Mobil", "Chevron",
+    "Shell", "ARCO", "Sinclair", "Conoco", "Valero", "Marathon", "Sunoco",
+    "BP", "76", "Kroger Fuel", "Safeway Fuel", "Fred Meyer Fuel",
+    "Maverik", "Stripes", "Cumberland Farms", "Thorntons", "Holiday",
+]
+
+# [ \t]* (not \s*) deliberately keeps these on a single line -- receipts
+# routinely have a price-per-gallon line immediately above/below a gallons
+# line, and \s* would happily "match" across that line break onto the
+# wrong number.
+_GALLON_PATTERNS = [
+    re.compile(r"(\d{1,2}\.\d{2,3})[ \t]*(?:GAL(?:LONS)?)\b", re.IGNORECASE),
+    # Negative lookbehind for "/" excludes "PRICE/GAL" style labels, which
+    # contain the substring "GAL" but describe price-per-gallon, not gallons.
+    re.compile(r"(?<!/)\bGAL(?:LONS)?\b[ \t]*[:\-]?[ \t]*\$?[ \t]*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
+]
+
+_PRICE_PER_GAL_PATTERNS = [
+    re.compile(r"\$?\s*(\d{1,2}\.\d{2,3})\s*/\s*GAL", re.IGNORECASE),
+    re.compile(r"PRICE\s*/?\s*GAL(?:LON)?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
+    re.compile(r"PPG\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,3})", re.IGNORECASE),
+    re.compile(r"@\s*\$?\s*(\d{1,2}\.\d{2,3})\s*/?\s*(?:GAL)?", re.IGNORECASE),
+]
+
+_TOTAL_PATTERNS = [
+    re.compile(r"FUEL\s*TOTAL\s*[:\-]?\s*\$?\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"\bTOTAL\s*(?:SALE|DUE|AMOUNT)?\s*[:\-]?\s*\$\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+    re.compile(r"AMOUNT\s*[:\-]?\s*\$\s*(\d{1,4}\.\d{2})", re.IGNORECASE),
+]
+
+_DATE_TOKEN_RE = re.compile(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b")
+_TIME_TOKEN_RE = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.?\b")
+
+_ADDRESS_FULL_RE = re.compile(
+    r"\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}?,\s*[A-Za-z.\- ]{2,30},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?"
+)
+_CITY_STATE_ZIP_RE = re.compile(r"[A-Za-z.\- ]{2,30},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?")
+_STREET_LINE_RE = re.compile(r"^\s*\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}$")
+
+
+@dataclass
+class ReceiptResult:
+    gallons: float | None = None
+    price_per_gallon: float | None = None
+    fuel_total: float | None = None
+    timestamp: datetime | None = None
+    station_brand: str | None = None
+    station_address: str | None = None
+    raw_text: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+def _first_match(patterns: list[re.Pattern], text: str) -> float | None:
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            try:
+                return float(m.group(1))
+            except (ValueError, IndexError):
+                continue
+    return None
+
+
+def _extract_brand(text: str) -> str | None:
+    upper = text.upper()
+    for brand in KNOWN_BRANDS:
+        if brand.upper() in upper:
+            return brand
+    return None
+
+
+def _extract_address(lines: list[str]) -> str | None:
+    joined = " ".join(line.strip() for line in lines if line.strip())
+    m = _ADDRESS_FULL_RE.search(joined)
+    if m:
+        return re.sub(r"\s+", " ", m.group(0)).strip(" ,")
+
+    for i, line in enumerate(lines):
+        if _CITY_STATE_ZIP_RE.search(line) and not _STREET_LINE_RE.match(line):
+            # Try to combine with a street-number line directly above it.
+            if i > 0 and _STREET_LINE_RE.match(lines[i - 1].strip()):
+                combined = f"{lines[i - 1].strip()}, {line.strip()}"
+                return re.sub(r"\s+", " ", combined).strip(" ,")
+            return line.strip()
+    return None
+
+
+def _extract_datetime(text: str) -> datetime | None:
+    date_match = _DATE_TOKEN_RE.search(text)
+    if not date_match:
+        return None
+    time_match = _TIME_TOKEN_RE.search(text)
+    combined = date_match.group(0)
+    if time_match:
+        combined = f"{combined} {time_match.group(0)}"
+    try:
+        return dateparser.parse(combined)
+    except (ValueError, OverflowError):
+        try:
+            return dateparser.parse(date_match.group(0))
+        except (ValueError, OverflowError):
+            return None
+
+
+def parse_receipt(result: OCRResult) -> ReceiptResult:
+    text = result.text or ""
+    lines = [ln for ln in text.splitlines()]
+
+    gallons = _first_match(_GALLON_PATTERNS, text)
+    price_per_gallon = _first_match(_PRICE_PER_GAL_PATTERNS, text)
+    fuel_total = _first_match(_TOTAL_PATTERNS, text)
+
+    r = ReceiptResult(
+        gallons=gallons,
+        price_per_gallon=price_per_gallon,
+        fuel_total=fuel_total,
+        timestamp=_extract_datetime(text),
+        station_brand=_extract_brand(text),
+        station_address=_extract_address(lines),
+        raw_text=text,
+    )
+
+    if gallons is None:
+        r.warnings.append("Could not find gallons on the receipt.")
+    if fuel_total is None and price_per_gallon is None:
+        r.warnings.append("Could not find a fuel total or price per gallon on the receipt.")
+    if r.timestamp is None:
+        r.warnings.append("Could not find a transaction date/time on the receipt.")
+
+    return r

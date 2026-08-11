@@ -1,0 +1,22 @@
+# Local build/dev convenience file. On Unraid, use the Docker UI + the
+# published GHCR image instead (see README.md / unraid/odo.xml).
+services:
+  odo:
+    build: .
+    image: ghcr.io/wmhunter96/odo:latest
+    container_name: odo
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - TZ=America/Chicago
+      - PUID=1000
+      - PGID=1000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

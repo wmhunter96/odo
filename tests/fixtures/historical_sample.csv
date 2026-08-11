@@ -1,0 +1,12 @@
+Odometer,Date,Gallons,Price/Gal,Fuel Total $,Gas Station Address,Brand,Avg MPG
+401,09/05/2025 6:11:59 PM,7.449,4.199,31.278351,"1004 S La Cienega Blvd, Los Angeles, CA 90035",Sinclair,49.934609
+821,09/27/2025 7:39 PM,8.411,4.459,37.50,"625 Las Tunas Dr, Arcadia, CA 91007",ARCO,56.938441
+1203,10/12/2025 5:15 PM,6.709,4.29,28.78,"500 W Main St, Alhambra, CA 91801",Chevron,52.109884
+1571,10/28/2025 8:02 AM,7.062,4.35,30.72,"200 E Valley Blvd, San Gabriel, CA 91776",Shell,52.419355
+1779,11/09/2025 6:47 PM,3.968,4.42,17.54,"1300 W Huntington Dr, Arcadia, CA 91007",Mobil,54.295331
+2150,11/22/2025 12:10 PM,6.833,4.28,29.25,"850 S Azusa Ave, City of Industry, CA 91748",76,55.995036
+2511,12/6/2025 12:39:31 PM,6.447,4.19,27.01,"400 E Colorado Blvd, Pasadena, CA 91101",QuikTrip,51.285006
+2956,12/20/2025 9:05 PM,8.677,4.09,35.49,"1200 S Baldwin Ave, Arcadia, CA 91007",Shell,48.513302
+3173,12/30/2025 4:23 PM,4.473,4.45,19.90,"300 W Duarte Rd, Monrovia, CA 91016",Chevron,48.901371
+3469,1/6/2026 8:15 AM,6.053,4.31,26.09,"900 E Foothill Blvd, Azusa, CA 91702",ARCO,51.376630
+3859,1/10/2026 12:42:00 PM,7.591,4.199,31.87,"2201 S Santa Anita Ave, Arcadia, CA 91006",Costco,
