@@ -17,9 +17,11 @@ from dateutil import parser as dateparser
 
 from .provider import OCRResult
 
-# Common gas station brands, used to normalize noisy OCR text like
-# "COSTCO WHOLESALE #123" -> "Costco". Longest names first so e.g. "Phillips
-# 66" matches before a bare "66" would.
+# Fast path for common chains ONLY -- normalizes noisy OCR text like
+# "COSTCO WHOLESALE #123" down to a clean canonical "Costco". This is
+# deliberately not the only way a brand gets found: independent/regional
+# stations (of which there are far too many to ever hardcode) fall back to
+# a structural heuristic in _extract_brand() instead of going unrecognized.
 KNOWN_BRANDS = [
     "Costco", "Sam's Club", "Kwik Trip", "Kwik Star",
     "Phillips 66", "Circle K", "Flying J", "Murphy USA", "Murphy Express",
@@ -84,6 +86,30 @@ _ADDRESS_FULL_RE = re.compile(
 )
 _CITY_STATE_ZIP_RE = re.compile(r"[A-Za-z.\- ]{2,30},\s*\b[A-Z]{2}\b\s*\d{5}(?:-\d{4})?")
 _STREET_LINE_RE = re.compile(r"^\s*\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}$")
+# Catches a garbled street line even when OCR mangles the leading digit
+# badly enough that _STREET_LINE_RE's "starts with digits" check misses it
+# entirely (e.g. "1004" -> "4aad") -- the street-type abbreviation at the
+# end tends to survive better than the leading house number does.
+_STREET_SUFFIX_RE = re.compile(
+    r"\b(BLVD|BL|ST|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|WAY|CT|COURT|PL|PLACE|HWY|PKWY|BOULEVARD|STREET)\.?\b",
+    re.IGNORECASE,
+)
+# A line that's just masked account digits/asterisks ("XXXXXXXXX3003"),
+# not a name.
+_MASKED_OR_CODE_LINE_RE = re.compile(r"^[\sXx0-9#*\-]+$")
+# Any run of 3+ consecutive digits reads as a reference/invoice/auth
+# number, not a business name.
+_DIGIT_RUN_RE = re.compile(r"\d{3,}")
+# First-word denylist for the receipt's transaction/payment furniture --
+# labels a hardcoded brand list can never keep up with, but these
+# generic terms are common to virtually every receipt format.
+_NON_BRAND_FIRST_WORDS = {
+    "debit", "credit", "cash", "invoice", "auth", "pump", "regular", "plus",
+    "premium", "diesel", "unleaded", "fuel", "total", "subtotal", "tax",
+    "change", "balance", "approved", "verified", "sequence", "contactless",
+    "mode", "aid", "tvr", "iad", "tsi", "arc", "arqc", "customer-activated",
+    "customer", "us", "price", "amount",
+}
 
 
 @dataclass
@@ -109,11 +135,54 @@ def _first_match(patterns: list[re.Pattern], text: str) -> float | None:
     return None
 
 
-def _extract_brand(text: str) -> str | None:
+# How many lines from the top of the receipt to consider for the brand
+# fallback -- the name is always near the very top, and staying this
+# narrow is itself a strong guard against picking up footer/payment
+# garbage further down that the keyword denylist doesn't happen to catch.
+_BRAND_SCAN_LINES = 8
+
+
+def _looks_like_brand_line(line: str) -> bool:
+    stripped = line.strip()
+    if not (2 <= len(stripped) <= 40):
+        return False
+    if _STREET_LINE_RE.match(stripped) or _STREET_SUFFIX_RE.search(stripped):
+        return False
+    if _CITY_STATE_ZIP_RE.search(stripped):
+        return False
+    if _MASKED_OR_CODE_LINE_RE.match(stripped):
+        return False
+    if _DATE_TOKEN_RE.search(stripped) or _TIME_TOKEN_RE.search(stripped):
+        return False
+    if _DIGIT_RUN_RE.search(stripped):
+        return False
+    first_word = re.sub(r"[^a-z\-]", "", stripped.split()[0].lower()) if stripped.split() else ""
+    if first_word in _NON_BRAND_FIRST_WORDS:
+        return False
+    if sum(c.isalpha() for c in stripped) < 2:
+        return False
+    return True
+
+
+def _extract_brand(text: str, lines: list[str]) -> str | None:
+    # Known chains first -- lets us normalize noisy OCR of a common brand
+    # to its canonical name (e.g. "COSTCO WHOLESALE #123" -> "Costco").
     upper = text.upper()
     for brand in KNOWN_BRANDS:
         if brand.upper() in upper:
             return brand
+
+    # Independent/regional stations will never all fit in a hardcoded
+    # list -- fall back to whatever plausible-looking business-name line
+    # appears first near the top of the receipt instead.
+    for line in lines[:_BRAND_SCAN_LINES]:
+        if _looks_like_brand_line(line):
+            # Strip stray OCR-noise punctuation from the edges (a
+            # misread border/torn-edge artifact, e.g. a trailing "]" or
+            # "|") without touching real internal punctuation like
+            # "Love's" or "7-Eleven".
+            return re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", line.strip())
+
     return None
 
 
@@ -170,7 +239,7 @@ def parse_receipt(result: OCRResult) -> ReceiptResult:
         price_per_gallon=price_per_gallon,
         fuel_total=fuel_total,
         timestamp=_extract_datetime(text),
-        station_brand=_extract_brand(text),
+        station_brand=_extract_brand(text, lines),
         station_address=_extract_address(lines),
         raw_text=text,
     )

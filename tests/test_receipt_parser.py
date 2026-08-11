@@ -123,3 +123,61 @@ def test_address_extracts_real_city_state_zip_on_one_line():
     assert result.station_address is not None
     assert "62704" in result.station_address
     assert "INVOICE" not in result.station_address
+
+
+# Independent/regional stations will never all fit in a hardcoded brand
+# list (this exact station -- "PRO MART" -- is a real example that
+# prompted moving off one entirely). The fallback instead looks for the
+# first plausible business-name line near the top of the receipt.
+INDEPENDENT_STATION_RECEIPT = """1004 S LA CIENEGA BL
+PRO MART
+XXXXXXXXX3003
+LOS ANGELES, CA
+90035
+
+REGULAR 5.422G
+PRICE/GAL $3.899
+FUEL TOTAL $ 21.14
+
+01/24/2026 4:19:59 PM
+"""
+
+
+def test_brand_falls_back_to_first_plausible_line_for_unknown_station():
+    result = parse_receipt(OCRResult(text=INDEPENDENT_STATION_RECEIPT))
+    assert result.station_brand == "PRO MART"
+
+
+def test_brand_fallback_strips_stray_ocr_edge_punctuation():
+    # A misread border/torn-edge artifact commonly shows up as a stray
+    # leading/trailing character on an otherwise-correct line.
+    receipt = "PRO MART ]\nFUEL TOTAL $ 21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand == "PRO MART"
+
+
+def test_brand_fallback_skips_address_date_and_code_lines():
+    receipt = (
+        "4aad Ss LA CIEWEGA BL\n"  # garbled street line (survives via the suffix check)
+        "XXXXXXXXX3003\n"  # masked account/reference code
+        "ai/24/2ne6 A53270231\n"  # garbled date + reference number
+        "PRO MART\n"  # the actual brand -- first line that isn't excluded
+        "INVOICE 883062\n"
+        "FUEL TOTAL $ 21.14\n"
+    )
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand == "PRO MART"
+
+
+def test_known_brand_takes_priority_over_fallback_heuristic():
+    # If a recognized chain name appears anywhere, prefer its canonical
+    # form over whatever line happens to be first.
+    receipt = "Fuel Stop Express\nCOSTCO WHOLESALE #123\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand == "Costco"
+
+
+def test_brand_fallback_returns_none_when_nothing_plausible_found():
+    receipt = "XXXXXXXXX3003\nINVOICE 883062\nAUTH 979648\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand is None
