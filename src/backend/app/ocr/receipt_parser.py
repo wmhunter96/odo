@@ -72,10 +72,17 @@ _TOTAL_PATTERNS = [
 _DATE_TOKEN_RE = re.compile(r"\d{1,2}\s*[/\-]\s*\d{1,2}\s*[/\-]\s*\d{2,4}\b")
 _TIME_TOKEN_RE = re.compile(r"\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\s*[AaPp]\.?[Mm]\.?\b")
 
+# \b around the state code in both of these is load-bearing: without it,
+# any two consecutive uppercase letters immediately before a 5-digit run
+# match -- which happily fires on completely unrelated all-caps receipt
+# lines like "INVOICE 883062" (matching "CE" + "88306" out of the middle
+# of "INVOICE"). The comma is required for the same reason: it's the one
+# structural signal that reliably distinguishes "city, ST zip" from
+# arbitrary nearby text.
 _ADDRESS_FULL_RE = re.compile(
-    r"\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}?,\s*[A-Za-z.\- ]{2,30},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?"
+    r"\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}?,\s*[A-Za-z.\- ]{2,30},?\s*\b[A-Z]{2}\b\s*\d{5}(?:-\d{4})?"
 )
-_CITY_STATE_ZIP_RE = re.compile(r"[A-Za-z.\- ]{2,30},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?")
+_CITY_STATE_ZIP_RE = re.compile(r"[A-Za-z.\- ]{2,30},\s*\b[A-Z]{2}\b\s*\d{5}(?:-\d{4})?")
 _STREET_LINE_RE = re.compile(r"^\s*\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}$")
 
 
@@ -117,12 +124,17 @@ def _extract_address(lines: list[str]) -> str | None:
         return re.sub(r"\s+", " ", m.group(0)).strip(" ,")
 
     for i, line in enumerate(lines):
-        if _CITY_STATE_ZIP_RE.search(line) and not _STREET_LINE_RE.match(line):
+        csz_match = _CITY_STATE_ZIP_RE.search(line)
+        if csz_match and not _STREET_LINE_RE.match(line):
+            # Use the actual matched "city, ST zip" text, not the whole
+            # line -- the line can (and does, in practice) contain other
+            # content the match happened to be found inside of.
+            city_state_zip = csz_match.group(0).strip()
             # Try to combine with a street-number line directly above it.
             if i > 0 and _STREET_LINE_RE.match(lines[i - 1].strip()):
-                combined = f"{lines[i - 1].strip()}, {line.strip()}"
+                combined = f"{lines[i - 1].strip()}, {city_state_zip}"
                 return re.sub(r"\s+", " ", combined).strip(" ,")
-            return line.strip()
+            return city_state_zip
     return None
 
 

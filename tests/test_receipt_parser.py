@@ -91,3 +91,35 @@ def test_total_without_dollar_sign_and_ignores_subtotal():
     # real assertion is that the SUBTOTAL line doesn't get matched as if
     # it were a plain "TOTAL" label (see the negative lookbehind).
     assert result.fuel_total == 34.89
+
+
+# Real garbled OCR output from a photographed receipt (see git history) --
+# "INVOICE 883062" used to get mistaken for a "city, ST zip" address
+# because two consecutive uppercase letters anywhere before a 5-digit run
+# matched (here: "CE" out of "INVOICE" + "88306" out of "883062"), with no
+# comma or word-boundary requirement to rule out the middle of an unrelated
+# word. It should extract nothing rather than something wrong.
+GARBLED_RECEIPT_WITH_INVOICE_LINE = """PRO MART
+Los ANGELES, CA
+INVOICE 883062
+AUTH 979648
+REGULAR 5.4226
+PRICE/GAL $3.899
+FUEL TOTAL $ 21.14
+"""
+
+
+def test_address_does_not_false_positive_on_invoice_line():
+    result = parse_receipt(OCRResult(text=GARBLED_RECEIPT_WITH_INVOICE_LINE))
+    assert result.station_address is None
+    # The rest of the receipt should still parse fine.
+    assert result.price_per_gallon == 3.899
+    assert result.fuel_total == 21.14
+
+
+def test_address_extracts_real_city_state_zip_on_one_line():
+    receipt = "Some Station\n123 Main St, Springfield, IL 62704\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_address is not None
+    assert "62704" in result.station_address
+    assert "INVOICE" not in result.station_address
