@@ -43,6 +43,17 @@ _GALLON_PATTERNS = [
     re.compile(r"(?<!/)\bGAL(?:LONS?|S)?\b[ \t]*[:\-]?[ \t]*\$?[ \t]*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
     # Compact single-letter unit some pumps print, e.g. "7.591G".
     re.compile(r"(\d{1,2}\.\d{2,4})[ \t]*G\b", re.IGNORECASE),
+    # Last resort: a fuel-grade label followed by a number with a
+    # spurious 4th decimal digit exactly where the "G" unit letter would
+    # be -- a common misread in some receipt fonts (e.g. "5.422G" read as
+    # "5.4226", the digit "6" standing in for "G"). US pump receipts
+    # always print gallons to exactly 3 decimal places, so a 4th digit
+    # here is a unit-letter misread, not real precision, far more often
+    # than it's a coincidence -- captures only the 3 real decimals.
+    re.compile(
+        r"\b(?:REGULAR|PLUS|PREMIUM|MIDGRADE|DIESEL|UNLEADED)\b[ \t]*(\d{1,2}\.\d{3})\d\b",
+        re.IGNORECASE,
+    ),
 ]
 
 _PRICE_PER_GAL_PATTERNS = [

@@ -156,6 +156,19 @@ def test_brand_fallback_strips_stray_ocr_edge_punctuation():
     assert result.station_brand == "PRO MART"
 
 
+def test_gallons_recovers_from_g_unit_misread_as_trailing_digit():
+    # Real garbled OCR output: "5.422G" read as "5.4226" -- the "G" unit
+    # letter misread as a digit, right after a fuel-grade label. US pump
+    # receipts always print gallons to exactly 3 decimal places, so the
+    # 4th digit is recovered as the unit letter, not treated as more
+    # precision or left unparsed (which would previously fall through to
+    # derive_missing_fuel_value() and report a misleading "wasn't directly
+    # readable" even though it plainly is, to a human, on the receipt).
+    receipt = "REGULAR 5.4226\nPRICE/GAL $3.899\nFUEL TOTAL $ 21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.gallons == 5.422
+
+
 def test_brand_fallback_skips_address_date_and_code_lines():
     receipt = (
         "4aad Ss LA CIEWEGA BL\n"  # garbled street line (survives via the suffix check)
