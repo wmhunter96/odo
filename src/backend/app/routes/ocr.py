@@ -54,11 +54,14 @@ async def process_ocr(
     odo_ocr = provider.read(odo_img)
     odo_result = parse_odometer(odo_ocr, previous_odometer=previous_odometer)
 
-    # --psm 6 ("assume a single uniform block of text") is the standard
-    # Tesseract tuning for receipts -- the default full-page-layout mode
-    # (psm 3) tends to fragment/drop short, tightly-spaced receipt lines.
+    # --psm 4 ("assume a single column of text of variable sizes") beat
+    # the default full-page layout mode (3) and the uniform-block mode (6)
+    # in a grid search against a real receipt scored against its known
+    # transcription -- a receipt genuinely is one column of variable-size
+    # text (small line items, bigger totals), which this describes more
+    # precisely than psm 6 does.
     receipt_img = prepare_for_ocr(receipt_bytes, mode="receipt")
-    receipt_ocr = provider.read(receipt_img, config="--psm 6")
+    receipt_ocr = provider.read(receipt_img, config="--psm 4")
     receipt_result = parse_receipt(receipt_ocr)
 
     gallons, price_per_gallon, fuel_total = validation.derive_missing_fuel_value(

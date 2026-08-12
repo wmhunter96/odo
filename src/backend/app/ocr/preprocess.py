@@ -14,12 +14,17 @@ import numpy as np
 from PIL import Image, ImageOps
 
 MAX_DIMENSION = 2200
-# Tuned against a real photographed thermal receipt (not just synthetic
-# test images): too little upscaling leaves fine dot-matrix print soft,
-# too much over-smooths it during binarization and starts flipping
-# similar-shaped digits (e.g. 1/7, 8/9) -- 1200px wide was the most
-# reliably correct point tested (500-1600px) for this font/resolution.
-MIN_RECEIPT_WIDTH = 1200
+# Tuned via a quantitative grid search against a real photographed
+# receipt, scored against its known-correct manual transcription (through
+# this exact function, not a reimplementation -- an earlier pass here
+# tuned against a hand-rolled cv2 pipeline that resized before converting
+# to grayscale, which turned out to behave differently enough from this
+# actual PIL-then-grayscale order to invalidate its numbers). 900px wide +
+# Otsu binarization + denoise strength 10 got gallons, price, total, AND
+# date all correct simultaneously, and did so across multiple PSM modes
+# (see routes/ocr.py) -- the more PSM-independent a width is, the more
+# likely it generalizes to receipts other than the one it was tuned on.
+MIN_RECEIPT_WIDTH = 900
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -226,17 +231,23 @@ def grayscale_contrast(img: Image.Image) -> Image.Image:
 
 
 def binarize_for_receipt(img: Image.Image) -> Image.Image:
-    """Grayscale + adaptive threshold to pure black/white. Printed (often
+    """Grayscale + denoise + threshold to pure black/white. Printed (often
     thermal) receipts are small, dense text on an already high-contrast
     background -- CLAHE tends to blotch that print into gray mush, while
     binarization is the standard, much more reliable preprocessing for
-    Tesseract on document/receipt text."""
+    Tesseract on document/receipt text.
+
+    Global Otsu thresholding (not adaptive/local thresholding) and a
+    stronger denoise pass (h=10, not 7) both came directly out of the grid
+    search referenced on MIN_RECEIPT_WIDTH -- adaptive thresholding was
+    actually *worse* here once the image is already tightly cropped to
+    just the receipt, since there's no more lighting gradient across the
+    frame for it to compensate for.
+    """
     mat = _to_cv(img)
     gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    gray = cv2.fastNlMeansDenoising(gray, h=7)
-    thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
-    )
+    gray = cv2.fastNlMeansDenoising(gray, h=10)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
     return Image.fromarray(thresh)
 
 
