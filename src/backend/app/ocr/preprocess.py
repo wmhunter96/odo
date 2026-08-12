@@ -24,7 +24,13 @@ MAX_DIMENSION = 2200
 # date all correct simultaneously, and did so across multiple PSM modes
 # (see routes/ocr.py) -- the more PSM-independent a width is, the more
 # likely it generalizes to receipts other than the one it was tuned on.
+# Used as an exact target (see resize_to_width), not just a floor.
 MIN_RECEIPT_WIDTH = 900
+# Second pass, tried only when the primary pass doesn't find an address --
+# a wider crop recovers small punctuation (a zip code's digits) better in
+# practice, at the cost of it more often losing the exact time-of-day. See
+# routes/ocr.py for how the two passes get merged.
+WIDE_RECEIPT_WIDTH = 1800
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -43,18 +49,28 @@ def downscale(img: Image.Image, max_dimension: int = MAX_DIMENSION) -> Image.Ima
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
 
 
-def upscale_if_small(img: Image.Image, min_width: int = MIN_RECEIPT_WIDTH) -> Image.Image:
-    """Cropping tightly to a receipt (crop_to_receipt) often leaves the
-    fine print narrower, in pixels, than reliable OCR wants -- upscale
-    (never downscale) so the width is at least min_width before binarizing.
-    Targets width specifically, not the longest side: a receipt's width is
-    the tighter constraint on individual character size, since it's
-    normally photographed as one long column of text."""
+def resize_to_width(img: Image.Image, width: int) -> Image.Image:
+    """Scale a receipt crop to an exact target width (both up and down --
+    the grid search behind MIN_RECEIPT_WIDTH found a specific sweet spot,
+    not just a floor, so a crop that's naturally already wider than the
+    target is deliberately brought back down to it too). Used to build a
+    receipt variant at a given width from an already-cropped image,
+    without repeating crop detection -- see prepare_receipt_variant()."""
     w, h = img.size
-    if w >= min_width:
+    if w == width:
         return img
-    scale = min_width / w
-    return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    scale = width / w
+    return img.resize((max(1, width), max(1, int(h * scale))), Image.LANCZOS)
+
+
+def prepare_receipt_variant(cropped_receipt: Image.Image, width: int) -> Image.Image:
+    """Build an OCR-ready receipt image at a specific target width from an
+    already-cropped receipt (crop_to_receipt()'s output). Different widths
+    genuinely favor different fields on the same receipt (finer print
+    detail vs. more legible small punctuation like a zip code), so the
+    caller may run OCR against more than one variant and merge whichever
+    fields each finds -- see routes/ocr.py."""
+    return binarize_for_receipt(resize_to_width(cropped_receipt, width))
 
 
 def _trim_margin(img: Image.Image, x_pct: float = 0.04, y_pct: float = 0.01) -> Image.Image:
@@ -251,6 +267,14 @@ def binarize_for_receipt(img: Image.Image) -> Image.Image:
     return Image.fromarray(thresh)
 
 
+def crop_receipt_from_bytes(data: bytes) -> Image.Image:
+    """load -> orient -> downscale -> crop to the receipt's outline. The
+    shared first half of the receipt pipeline, split out so a caller that
+    wants more than one binarized variant (see prepare_receipt_variant())
+    doesn't have to repeat crop detection for each one."""
+    return crop_to_receipt(downscale(load_image(data)))
+
+
 def prepare_for_ocr(data: bytes, mode: str = "odometer") -> Image.Image:
     """Full pipeline. `mode` is "odometer" (dashboard display) or "receipt"
     (printed text):
@@ -262,11 +286,10 @@ def prepare_for_ocr(data: bytes, mode: str = "odometer") -> Image.Image:
                   upscale back up if the crop left the print small ->
                   binarize
     """
+    if mode == "receipt":
+        return prepare_receipt_variant(crop_receipt_from_bytes(data), MIN_RECEIPT_WIDTH)
+
     img = load_image(data)
     img = downscale(img)
-    if mode == "receipt":
-        img = crop_to_receipt(img)
-        img = upscale_if_small(img)
-        return binarize_for_receipt(img)
     img = deskew(img)
     return grayscale_contrast(img)

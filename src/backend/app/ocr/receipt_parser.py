@@ -96,6 +96,10 @@ _ADDRESS_FULL_RE = re.compile(
     r"\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}?,\s*[A-Za-z.\- ]{2,30},?\s*\b[A-Z]{2}\b\s*\d{5}(?:-\d{4})?"
 )
 _CITY_STATE_ZIP_RE = re.compile(r"[A-Za-z.\- ]{2,30},\s*\b[A-Z]{2}\b\s*\d{5}(?:-\d{4})?")
+# City/state and the zip often land on two separate OCR lines rather than
+# one -- these two match each half so they can be bridged back together.
+_CITY_STATE_ONLY_RE = re.compile(r"[A-Za-z.\- ]{2,30},\s*\b[A-Z]{2}\b\s*$")
+_BARE_ZIP_LINE_RE = re.compile(r"^\s*\d{5}(?:-\d{4})?\s*$")
 _STREET_LINE_RE = re.compile(r"^\s*\d{1,6}\s+[A-Za-z0-9.'\- ]{3,40}$")
 # Catches a garbled street line even when OCR mangles the leading digit
 # badly enough that _STREET_LINE_RE's "starts with digits" check misses it
@@ -197,6 +201,26 @@ def _extract_brand(text: str, lines: list[str]) -> str | None:
     return None
 
 
+def _find_preceding_street_line(lines: list[str], index: int, lookback: int = 5) -> str | None:
+    """Search backward from `index` for a street-address-looking line,
+    tolerating other receipt content (a store name, a masked account
+    number) sitting between it and the city/state/zip -- real layouts
+    routinely have that gap, it's not just adjacent lines."""
+    for j in range(index - 1, max(-1, index - 1 - lookback), -1):
+        candidate = lines[j].strip()
+        if candidate and (_STREET_LINE_RE.match(candidate) or _STREET_SUFFIX_RE.search(candidate)):
+            return candidate
+    return None
+
+
+def _next_nonblank_line(lines: list[str], index: int, lookahead: int = 3) -> str | None:
+    for j in range(index + 1, min(len(lines), index + 1 + lookahead)):
+        candidate = lines[j].strip()
+        if candidate:
+            return candidate
+    return None
+
+
 def _extract_address(lines: list[str]) -> str | None:
     joined = " ".join(line.strip() for line in lines if line.strip())
     m = _ADDRESS_FULL_RE.search(joined)
@@ -210,11 +234,29 @@ def _extract_address(lines: list[str]) -> str | None:
             # line -- the line can (and does, in practice) contain other
             # content the match happened to be found inside of.
             city_state_zip = csz_match.group(0).strip()
-            # Try to combine with a street-number line directly above it.
-            if i > 0 and _STREET_LINE_RE.match(lines[i - 1].strip()):
-                combined = f"{lines[i - 1].strip()}, {city_state_zip}"
+            street = _find_preceding_street_line(lines, i)
+            if street:
+                combined = f"{street}, {city_state_zip}"
                 return re.sub(r"\s+", " ", combined).strip(" ,")
             return city_state_zip
+
+    # City/state and the zip commonly end up on two separate OCR lines --
+    # bridge a "City, ST" line to a bare zip code on the next non-blank
+    # line, rather than requiring them on one line together.
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not _CITY_STATE_ONLY_RE.search(stripped):
+            continue
+        zip_line = _next_nonblank_line(lines, i)
+        if not zip_line or not _BARE_ZIP_LINE_RE.match(zip_line):
+            continue
+        city_state_zip = f"{stripped} {zip_line}"
+        street = _find_preceding_street_line(lines, i)
+        if street:
+            combined = f"{street}, {city_state_zip}"
+            return re.sub(r"\s+", " ", combined).strip(" ,")
+        return re.sub(r"\s+", " ", city_state_zip).strip(" ,")
+
     return None
 
 

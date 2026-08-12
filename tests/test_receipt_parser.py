@@ -194,3 +194,43 @@ def test_brand_fallback_returns_none_when_nothing_plausible_found():
     receipt = "XXXXXXXXX3003\nINVOICE 883062\nAUTH 979648\nFUEL TOTAL $10.00\n"
     result = parse_receipt(OCRResult(text=receipt))
     assert result.station_brand is None
+
+
+# Real receipt layout: street address, then store name, then a masked
+# account code, THEN city/state on one line and the zip on the very next
+# line -- not all on one line together, which the original address regex
+# required.
+SEPARATE_LINE_ADDRESS_RECEIPT = """1004 S LA CIENEGA BL
+PRO MART
+XXXXXXXXX3003
+LOS ANGELES, CA
+90035
+
+FUEL TOTAL $ 21.14
+"""
+
+
+def test_address_bridges_city_state_and_zip_on_separate_lines():
+    result = parse_receipt(OCRResult(text=SEPARATE_LINE_ADDRESS_RECEIPT))
+    assert result.station_address is not None
+    assert "LOS ANGELES" in result.station_address
+    assert "90035" in result.station_address
+    # The street line should get picked up too, even with the store name
+    # and masked account code sitting between it and the city/state line.
+    assert "1004" in result.station_address
+    assert "CIENEGA" in result.station_address.upper()
+
+
+def test_address_bridging_skips_blank_lines_between_city_state_and_zip():
+    receipt = "Some Station\n123 Main St\nSpringfield, IL\n\n62704\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_address is not None
+    assert "62704" in result.station_address
+
+
+def test_address_bridging_does_not_fire_without_a_real_zip_following():
+    # "Springfield, IL" alone, followed by unrelated content -- must not
+    # grab some other number and call it a zip.
+    receipt = "Some Station\nSpringfield, IL\nINVOICE 883062\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_address is None
