@@ -25,12 +25,19 @@ MAX_DIMENSION = 2200
 # (see routes/ocr.py) -- the more PSM-independent a width is, the more
 # likely it generalizes to receipts other than the one it was tuned on.
 # Used as an exact target (see resize_to_width), not just a floor.
+#
+# Re-tuned after switching to the "best" (not "fast") Tesseract English
+# model -- see tesseract_provider.py -- which changes what each width
+# gets right. 900 still wins for gallons/price/total/date with the new
+# model too.
 MIN_RECEIPT_WIDTH = 900
 # Second pass, tried only when the primary pass doesn't find an address --
 # a wider crop recovers small punctuation (a zip code's digits) better in
 # practice, at the cost of it more often losing the exact time-of-day. See
-# routes/ocr.py for how the two passes get merged.
-WIDE_RECEIPT_WIDTH = 1800
+# routes/ocr.py for how the two passes get merged. 1200 (not the "fast"-
+# model-era 1800) is what actually recovers the address with the "best"
+# model -- re-verified directly, not carried over by assumption.
+WIDE_RECEIPT_WIDTH = 1200
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -259,12 +266,20 @@ def binarize_for_receipt(img: Image.Image) -> Image.Image:
     actually *worse* here once the image is already tightly cropped to
     just the receipt, since there's no more lighting gradient across the
     frame for it to compensate for.
+
+    A small white border is added at the end -- Tesseract's own
+    documentation recommends a sensible border, since text running right up
+    against the image edge can be misread. It made no measurable difference
+    on the specific receipt this pipeline was tuned against (already had
+    margin from _trim_margin), but it's effectively free and protects
+    against tighter crops on other receipts, so it stays in regardless.
     """
     mat = _to_cv(img)
     gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
     gray = cv2.fastNlMeansDenoising(gray, h=10)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    return Image.fromarray(thresh)
+    bordered = cv2.copyMakeBorder(thresh, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+    return Image.fromarray(bordered)
 
 
 def crop_receipt_from_bytes(data: bytes) -> Image.Image:

@@ -29,17 +29,33 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STATIC_DIR=/app/static \
     PORT=8080 \
     GIT_SHA=${GIT_SHA} \
-    BUILD_DATE=${BUILD_DATE}
+    BUILD_DATE=${BUILD_DATE} \
+    TESSDATA_PREFIX=/usr/share/tessdata-best
 
-# tesseract-ocr: local, free, CPU-only OCR engine (no GPU, no network calls)
-# libgl1/libglib2.0-0: runtime libs required by opencv-python-headless
-# curl: used by the container HEALTHCHECK
+# tesseract-ocr: local, free, CPU-only OCR engine (no GPU, no network calls
+# at runtime -- the traineddata download below happens at build time, same
+# as pip/npm installs).
+# libgl1/libglib2.0-0/libgomp1: runtime libs required by opencv-python-headless
+# curl: used by the container HEALTHCHECK, and to fetch the traineddata below
+#
+# apt's tesseract-ocr-eng ships Google's "fast" (integer-quantized) English
+# model, optimized for throughput over accuracy. This app runs OCR at most a
+# few times a minute (one fill-up at a time, by a human standing at a gas
+# pump), so accuracy matters far more than shaving milliseconds -- replaced
+# with Google's "best" (float, higher-accuracy) model instead. Confirmed
+# directly against a real receipt: "best" correctly read a house number
+# ("1004") that "fast" consistently misread as "4004" across every
+# preprocessing variant tried (crop, upscale, contrast, sharpen, whitelist).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
         curl \
+    && mkdir -p "$TESSDATA_PREFIX" \
+    && curl -fsSL -o "$TESSDATA_PREFIX/eng.traineddata" \
+        https://github.com/tesseract-ocr/tessdata_best/raw/main/eng.traineddata \
+    && chmod 644 "$TESSDATA_PREFIX/eng.traineddata" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -281,3 +281,19 @@ def test_dollar_sign_fix_does_not_touch_real_currency_amounts():
     result = parse_receipt(OCRResult(text=receipt))
     assert result.station_address == "1004 S LA CIENEGA BL, LOS ANGELES, CA 90035"
     assert result.fuel_total == 21.14
+
+
+# Real garbled OCR output: "76" (a known brand in KNOWN_BRANDS) matched as
+# a substring inside an unrelated reference number ("...4532760231...")
+# because the check had no word boundaries.
+def test_known_brand_does_not_false_positive_inside_unrelated_digits():
+    receipt = "PRO MART\n01/24/2026 4532760231\nFUEL TOTAL $21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand != "76"
+    assert result.station_brand == "PRO MART"
+
+
+def test_known_brand_still_matches_as_a_real_standalone_word():
+    receipt = "76\n123 Main St, Springfield, IL 62704\nFUEL TOTAL $21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_brand == "76"

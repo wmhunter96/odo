@@ -191,9 +191,13 @@ def _looks_like_brand_line(line: str) -> bool:
 def _extract_brand(text: str, lines: list[str]) -> str | None:
     # Known chains first -- lets us normalize noisy OCR of a common brand
     # to its canonical name (e.g. "COSTCO WHOLESALE #123" -> "Costco").
+    # \b word boundaries are load-bearing for short brand names like "76"
+    # or "BP": a plain substring check matches those inside completely
+    # unrelated digit/letter runs too (confirmed against a real receipt --
+    # "76" matched inside a reference number, "...4532760231...").
     upper = text.upper()
     for brand in KNOWN_BRANDS:
-        if brand.upper() in upper:
+        if re.search(rf"\b{re.escape(brand.upper())}\b", upper):
             return brand
 
     # Independent/regional stations will never all fit in a hardcoded

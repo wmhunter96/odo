@@ -76,7 +76,7 @@ async def process_ocr(
     # only when the primary pass didn't find an address at all.
     if receipt_result.station_address is None:
         wide_img = prepare_receipt_variant(cropped_receipt, WIDE_RECEIPT_WIDTH)
-        wide_ocr = provider.read(wide_img, config="--psm 6")
+        wide_ocr = provider.read(wide_img, config="--psm 4")
         wide_result = parse_receipt(wide_ocr)
         receipt_result.station_address = wide_result.station_address
         if wide_result.raw_text:
