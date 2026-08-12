@@ -56,12 +56,18 @@ _GALLON_PATTERNS = [
     ),
 ]
 
+# [.,] (not just \.) tolerates the decimal point misreading as a comma --
+# confirmed against a real receipt ("PRICE/GAL $3,899" instead of
+# "$3.899"). Safe to allow broadly here since a price-per-gallon is never
+# in the thousands, so there's no real "thousands separator" comma this
+# could be confused with. _first_match() normalizes the captured comma
+# back to a period before parsing.
 _PRICE_PER_GAL_PATTERNS = [
-    re.compile(r"\$?\s*(\d{1,2}\.\d{2,4})\s*/\s*(?:GAL(?:LON)?|G)\b", re.IGNORECASE),
-    re.compile(r"PRICE\s*/?\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
-    re.compile(r"PER\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
-    re.compile(r"PPG\s*[:\-]?\s*\$?\s*(\d{1,2}\.\d{2,4})", re.IGNORECASE),
-    re.compile(r"@\s*\$?\s*(\d{1,2}\.\d{2,4})\s*/?\s*(?:GAL)?", re.IGNORECASE),
+    re.compile(r"\$?\s*(\d{1,2}[.,]\d{2,4})\s*/\s*(?:GAL(?:LON)?|G)\b", re.IGNORECASE),
+    re.compile(r"PRICE\s*/?\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}[.,]\d{2,4})", re.IGNORECASE),
+    re.compile(r"PER\s*GAL(?:LON)?S?\.?\s*[:\-]?\s*\$?\s*(\d{1,2}[.,]\d{2,4})", re.IGNORECASE),
+    re.compile(r"PPG\s*[:\-]?\s*\$?\s*(\d{1,2}[.,]\d{2,4})", re.IGNORECASE),
+    re.compile(r"@\s*\$?\s*(\d{1,2}[.,]\d{2,4})\s*/?\s*(?:GAL)?", re.IGNORECASE),
 ]
 
 _TOTAL_PATTERNS = [
@@ -144,7 +150,10 @@ def _first_match(patterns: list[re.Pattern], text: str) -> float | None:
         m = pattern.search(text)
         if m:
             try:
-                return float(m.group(1))
+                # Only ever relevant for patterns that deliberately allow a
+                # comma as a misread decimal point (see _PRICE_PER_GAL_PATTERNS)
+                # -- a no-op for every other pattern, which never capture one.
+                return float(m.group(1).replace(",", "."))
             except (ValueError, IndexError):
                 continue
     return None
@@ -264,19 +273,36 @@ def _extract_datetime(text: str) -> datetime | None:
     date_match = _DATE_TOKEN_RE.search(text)
     if not date_match:
         return None
-    time_match = _TIME_TOKEN_RE.search(text)
     # Strip whitespace the token regexes deliberately tolerated around
     # separators (see their comments) before handing off to dateutil.
-    combined = re.sub(r"\s+", "", date_match.group(0))
+    date_str = re.sub(r"\s+", "", date_match.group(0))
+
+    time_match = _TIME_TOKEN_RE.search(text)
+    time_candidates: list[str] = []
     if time_match:
-        combined = f"{combined} {re.sub(r'\\s+', '', time_match.group(0))}"
-    try:
-        return dateparser.parse(combined)
-    except (ValueError, OverflowError):
+        time_str = re.sub(r"\s+", "", time_match.group(0))
+        time_candidates.append(time_str)
+        # A 2-digit hour that's outside 1-12 (this pattern only matches
+        # with an AM/PM suffix, so it's always a 12-hour clock) is almost
+        # always a misread leading digit glued onto a real 1-digit hour --
+        # the same "extra spurious digit" issue as the gallons G-unit
+        # misread, e.g. a smudged "0" reading as "9" turns "4:19" into
+        # "94:19". Retry with just the last hour digit.
+        hour_match = re.match(r"^(\d{2}):", time_str)
+        if hour_match and int(hour_match.group(1)) > 12:
+            time_candidates.append(hour_match.group(1)[-1] + time_str[2:])
+
+    for time_str in time_candidates or [None]:  # type: ignore[list-item]
+        candidate = f"{date_str} {time_str}" if time_str else date_str
         try:
-            return dateparser.parse(re.sub(r"\s+", "", date_match.group(0)))
+            return dateparser.parse(candidate)
         except (ValueError, OverflowError):
-            return None
+            continue
+
+    try:
+        return dateparser.parse(date_str)
+    except (ValueError, OverflowError):
+        return None
 
 
 def parse_receipt(result: OCRResult) -> ReceiptResult:

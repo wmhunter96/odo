@@ -234,3 +234,30 @@ def test_address_bridging_does_not_fire_without_a_real_zip_following():
     receipt = "Some Station\nSpringfield, IL\nINVOICE 883062\nFUEL TOTAL $10.00\n"
     result = parse_receipt(OCRResult(text=receipt))
     assert result.station_address is None
+
+
+# Real garbled OCR output: hour "04" misread as "94" (both digits wrong --
+# a smudged "0" reading as "9"), an invalid 12-hour-clock hour that
+# dateutil correctly refuses to parse as-is.
+def test_time_recovers_from_spurious_leading_hour_digit():
+    receipt = "01/24/2026 94:19:59 PM\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.timestamp is not None
+    assert (result.timestamp.hour, result.timestamp.minute, result.timestamp.second) == (16, 19, 59)
+
+
+def test_time_with_plausible_two_digit_hour_is_not_altered():
+    # A real 2-digit hour (<=12) must be left alone -- only an
+    # out-of-range one should trigger the leading-digit-drop retry.
+    receipt = "01/24/2026 11:05:00 AM\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.timestamp is not None
+    assert result.timestamp.hour == 11
+
+
+# Real garbled OCR output: decimal point misread as a comma
+# ("PRICE/GAL $3,899" instead of "$3.899").
+def test_price_per_gallon_recovers_from_comma_decimal_misread():
+    receipt = "PRICE/GAL $3,899\nFUEL TOTAL $ 21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.price_per_gallon == 3.899
