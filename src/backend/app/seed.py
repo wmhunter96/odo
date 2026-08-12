@@ -8,11 +8,6 @@ DEFAULT_SETTINGS = {
     "theme": "system",
     "timezone": "UTC",
     "ocr_engine": "tesseract",
-    # Off by default: the one setting that, when enabled, sends data
-    # (the OCR'd receipt address) to an external service (OpenStreetMap
-    # Nominatim) -- see app/geocode.py. Everything else in Odo works
-    # fully offline regardless of this setting.
-    "geocode_enabled": "false",
 }
 
 

@@ -101,10 +101,6 @@ export default function NewFillUp() {
       if (form.station_brand) fd.append("station_brand", form.station_brand);
       if (form.station_address) fd.append("station_address", form.station_address);
       if (form.notes) fd.append("notes", form.notes);
-      // Only ever set when Settings -> Address Lookup found a confirmed
-      // real fuel station for this address (see OCRProcessResponse).
-      if (ocr?.latitude != null) fd.append("latitude", String(ocr.latitude));
-      if (ocr?.longitude != null) fd.append("longitude", String(ocr.longitude));
       fd.append("source", "ocr");
       if (ocr?.odometer_raw_text) fd.append("raw_odometer_ocr", ocr.odometer_raw_text);
       if (ocr?.receipt_raw_text) fd.append("raw_receipt_ocr", ocr.receipt_raw_text);
@@ -234,14 +230,7 @@ export default function NewFillUp() {
           />
         </div>
         <div className="field">
-          <label>
-            Address
-            {ocr?.latitude != null && (
-              <span className="chip chip-source-ocr" style={{ marginLeft: 8 }}>
-                ✓ Verified
-              </span>
-            )}
-          </label>
+          <label>Address</label>
           <input
             type="text"
             value={form.station_address}

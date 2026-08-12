@@ -71,10 +71,6 @@ export interface OCRProcessResponse {
   fuel_total: number | null;
   station_brand: string | null;
   station_address: string | null;
-  // Only populated when Settings -> Address Lookup is on and the address
-  // resolved to a confirmed real fuel station.
-  latitude: number | null;
-  longitude: number | null;
   timestamp: string | null;
   receipt_raw_text: string;
 
@@ -154,7 +150,6 @@ export interface AppSettings {
   theme: "light" | "dark" | "system";
   timezone: string;
   ocr_engine: string;
-  geocode_enabled: boolean;
 }
 
 export interface Healthz {
