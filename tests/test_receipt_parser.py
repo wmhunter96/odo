@@ -261,3 +261,23 @@ def test_price_per_gallon_recovers_from_comma_decimal_misread():
     receipt = "PRICE/GAL $3,899\nFUEL TOTAL $ 21.14\n"
     result = parse_receipt(OCRResult(text=receipt))
     assert result.price_per_gallon == 3.899
+
+
+# Real garbled OCR output: the directional prefix "S" in a street address
+# misread as "$" (a well-known OCR confusable -- the dollar sign is a
+# stylized S) -- "1004 S LA CIENEGA BL" read as "4904 $ LA CIENEGA BL".
+def test_address_recovers_directional_s_misread_as_dollar_sign():
+    receipt = "4904 $ LA CIENEGA BL\nLOS ANGELES, CA\n90035\nFUEL TOTAL $10.00\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_address is not None
+    assert "$" not in result.station_address
+    assert "S LA CIENEGA" in result.station_address
+
+
+def test_dollar_sign_fix_does_not_touch_real_currency_amounts():
+    # "$21.14" has a digit immediately after the "$" -- must not be
+    # mistaken for the isolated-token case above.
+    receipt = "1004 S LA CIENEGA BL\nLOS ANGELES, CA 90035\nFUEL TOTAL $21.14\n"
+    result = parse_receipt(OCRResult(text=receipt))
+    assert result.station_address == "1004 S LA CIENEGA BL, LOS ANGELES, CA 90035"
+    assert result.fuel_total == 21.14

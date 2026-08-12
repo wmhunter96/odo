@@ -230,7 +230,27 @@ def _next_nonblank_line(lines: list[str], index: int, lookahead: int = 3) -> str
     return None
 
 
+# A lone "$" surrounded by whitespace (i.e. its own token, not glued to a
+# number) is never a real currency symbol -- addresses don't contain
+# prices. It's virtually always a misread "S" (the two are a well-known
+# OCR confusable pair; a dollar sign is literally derived from a stylized
+# S), most often the "S"/"N"/"E"/"W" directional prefix in a street
+# address (e.g. "1004 S LA CIENEGA BL"). The lookaround keeps this from
+# ever touching a genuine amount like "$21.14", where "$" is immediately
+# followed by a digit.
+_LONE_DOLLAR_SIGN_RE = re.compile(r"(?<!\S)\$(?!\S)")
+
+
+def _fix_dollar_sign_s_confusion(text: str) -> str:
+    return _LONE_DOLLAR_SIGN_RE.sub("S", text)
+
+
 def _extract_address(lines: list[str]) -> str | None:
+    result = _extract_address_raw(lines)
+    return _fix_dollar_sign_s_confusion(result) if result else result
+
+
+def _extract_address_raw(lines: list[str]) -> str | None:
     joined = " ".join(line.strip() for line in lines if line.strip())
     m = _ADDRESS_FULL_RE.search(joined)
     if m:
