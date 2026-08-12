@@ -41,6 +41,11 @@ export default function Settings() {
     setSettings(updated);
   }
 
+  async function onGeocodeToggle(enabled: boolean) {
+    const updated = await api.updateSettings({ geocode_enabled: enabled });
+    setSettings(updated);
+  }
+
   async function onFileChosen(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -182,6 +187,25 @@ export default function Settings() {
           <select value={settings?.ocr_engine ?? "tesseract"} disabled>
             <option value="tesseract">Tesseract (local, CPU)</option>
           </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={settings?.geocode_enabled ?? false}
+              onChange={(e) => onGeocodeToggle(e.target.checked)}
+              style={{ width: 20, height: 20, flexShrink: 0 }}
+            />
+            <span>Address Lookup</span>
+          </label>
+          <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginTop: 6 }}>
+            Off by default. OCR sometimes misreads a house-number digit with no way to tell from
+            the receipt text alone — when this is on, the extracted address is checked against{" "}
+            <strong style={{ color: "var(--text)" }}>OpenStreetMap</strong> (free, no account) and
+            corrected only if it resolves to a confirmed real gas station. This is the only thing
+            in Odo that sends data off your network; every other feature works fully offline
+            whether this is on or off.
+          </div>
         </div>
       </div>
 

@@ -51,6 +51,7 @@ Everything persists under a single `/data` directory: the SQLite database, every
 - 📱 **Installable PWA** — home-screen install on iOS/Android, offline-capable app shell, camera capture input
 - 🌗 **Light / Dark / System theme**
 - 🐳 **One Docker container**, SQLite, no external services, works with zero internet access
+- 📍 **Optional address verification** — off by default; when enabled (Settings → OCR → Address Lookup), a receipt's OCR'd address is checked against OpenStreetMap (free, no account) and only corrected if it resolves to a confirmed real fuel station. This is the *only* thing in Odo that talks to the internet — every other feature, including the whole fill-up flow, works with it left off
 
 ### Future Features (not in v1 — see the project spec for the full list)
 

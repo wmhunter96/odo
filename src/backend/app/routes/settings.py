@@ -30,6 +30,7 @@ def get_settings(db: Session = Depends(get_db)):
         theme=_get(db, "theme", "system"),
         timezone=_get(db, "timezone", "UTC"),
         ocr_engine=_get(db, "ocr_engine", "tesseract"),
+        geocode_enabled=_get(db, "geocode_enabled", "false") == "true",
     )
 
 
@@ -37,8 +38,12 @@ def get_settings(db: Session = Depends(get_db)):
 def update_settings(payload: schemas.SettingsUpdate, db: Session = Depends(get_db)):
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
-        if value is not None:
-            _set(db, key, str(value))
+        if value is None:
+            continue
+        # bool -> lowercase "true"/"false" explicitly -- str(True) would
+        # otherwise write "True" (capital), which the == "true" check
+        # above would never match back on read.
+        _set(db, key, "true" if value is True else "false" if value is False else str(value))
     db.commit()
     return get_settings(db)
 

@@ -7,6 +7,8 @@ from .. import calculations, validation
 from ..config import settings as app_settings
 from ..db import get_db
 from ..deps import get_active_vehicle
+from ..geocode import lookup_address
+from ..models import Setting, Vehicle
 from ..ocr import get_provider
 from ..ocr.odometer_parser import parse_odometer
 from ..ocr.preprocess import (
@@ -41,9 +43,7 @@ async def process_ocr(
     vehicle_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    from ..models import Vehicle
-
-    vehicle_obj: Vehicle = db.get(Vehicle, vehicle_id) if vehicle_id else get_active_vehicle(db)
+    vehicle_obj: Vehicle | None = db.get(Vehicle, vehicle_id) if vehicle_id else get_active_vehicle(db)
     if vehicle_obj is None:
         raise HTTPException(status_code=404, detail="Vehicle not found")
 
@@ -83,6 +83,24 @@ async def process_ocr(
             receipt_result.raw_text = (
                 f"{receipt_result.raw_text}\n\n--- wider pass, address recovery ---\n\n{wide_result.raw_text}"
             )
+
+    # Optional, off by default (Settings -> Address Lookup): OCR gets a
+    # house number's individual digits wrong far more often than it gets
+    # street/city/state/zip wrong, with no structural signal to correct
+    # that the way e.g. the receipt_parser S/$ fix has -- a geocoder can
+    # both sanity-check that and confirm the result is an actual fuel
+    # station before trusting it. Every failure mode (disabled, offline,
+    # timeout, no match, not a fuel station) leaves station_address
+    # exactly as OCR found it; this never blocks or errors the request.
+    latitude: float | None = None
+    longitude: float | None = None
+    geocode_setting = db.get(Setting, "geocode_enabled")
+    if geocode_setting and geocode_setting.value == "true" and receipt_result.station_address:
+        geo = lookup_address(receipt_result.station_address)
+        if geo is not None:
+            receipt_result.station_address = geo.address
+            latitude = geo.latitude
+            longitude = geo.longitude
 
     gallons, price_per_gallon, fuel_total = validation.derive_missing_fuel_value(
         receipt_result.gallons, receipt_result.price_per_gallon, receipt_result.fuel_total
@@ -133,6 +151,8 @@ async def process_ocr(
         fuel_total=fuel_total,
         station_brand=receipt_result.station_brand,
         station_address=receipt_result.station_address,
+        latitude=latitude,
+        longitude=longitude,
         timestamp=receipt_result.timestamp,
         receipt_raw_text=receipt_result.raw_text,
         previous_odometer=previous_odometer,

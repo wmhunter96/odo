@@ -95,6 +95,13 @@ class OCRProcessResponse(BaseModel):
     fuel_total: float | None
     station_brand: str | None
     station_address: str | None
+    # Only ever populated when Settings -> Address Lookup is on AND the
+    # address resolved to a confirmed real fuel station -- see
+    # app/geocode.py. None in every other case (including "lookup
+    # disabled" and "lookup failed/offline"), same as everything else OCR
+    # didn't find.
+    latitude: float | None
+    longitude: float | None
     timestamp: datetime | None
     receipt_raw_text: str
 
@@ -179,9 +186,13 @@ class SettingsOut(BaseModel):
     theme: str = "system"
     timezone: str = "UTC"
     ocr_engine: str = "tesseract"
+    # Off by default -- the only setting that sends anything (an OCR'd
+    # receipt address) to an external service. See app/geocode.py.
+    geocode_enabled: bool = False
 
 
 class SettingsUpdate(BaseModel):
     theme: str | None = None
     timezone: str | None = None
     ocr_engine: str | None = None
+    geocode_enabled: bool | None = None
