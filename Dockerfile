@@ -79,7 +79,41 @@ RUN pip install --no-cache-dir -r requirements.txt
 # rather than at construction, and skipping the predict() call here
 # would silently leave those to download on the container's first real
 # request instead, defeating the point.
-RUN python -c "import numpy as np; from paddleocr import PaddleOCR; ocr = PaddleOCR(lang='en', ocr_version='PP-OCRv6', use_doc_orientation_classify=True, use_doc_unwarping=True, use_textline_orientation=True); ocr.predict(np.full((64, 64, 3), 255, dtype=np.uint8))"
+#
+# Written as an explicit script (not a one-line `python -c`) with its own
+# try/except + flushed prints: a bare uncaught exception normally prints
+# its own traceback, but if this step ever dies from something that
+# *doesn't* raise a catchable Python exception -- most plausibly an
+# out-of-memory kill, given this loads 5 sub-models into one process on a
+# CI runner also busy running the build itself -- there's otherwise no
+# way to tell that apart from a silent hang short of the exit code alone.
+# The progress prints at least narrow down how far it got.
+RUN python -u <<'PY'
+import sys
+import traceback
+
+import numpy as np
+
+print("Importing paddleocr...", flush=True)
+from paddleocr import PaddleOCR
+
+try:
+    print("Constructing PP-OCRv6 pipeline (downloads weights on first use)...", flush=True)
+    ocr = PaddleOCR(
+        lang="en",
+        ocr_version="PP-OCRv6",
+        use_doc_orientation_classify=True,
+        use_doc_unwarping=True,
+        use_textline_orientation=True,
+    )
+    print("Running a warm-up prediction...", flush=True)
+    ocr.predict(np.full((64, 64, 3), 255, dtype=np.uint8))
+    print("PP-OCRv6 warm-up succeeded.", flush=True)
+except Exception:
+    print("PP-OCRv6 warm-up FAILED:", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
+PY
 
 # Same idea, second model: pre-download PaddleOCR-VL-1.6's weights (see
 # receipt_vlm.py -- MODEL_NAME must match this string exactly). A tiny
@@ -87,7 +121,36 @@ RUN python -c "import numpy as np; from paddleocr import PaddleOCR; ocr = Paddle
 # and a real forward pass without spending meaningful build time actually
 # generating text -- this step exists purely to warm the weight cache, not
 # to validate output quality.
-RUN python -c "import numpy as np; from PIL import Image; from paddleocr import DocUnderstanding; Image.fromarray(np.full((64, 64, 3), 255, dtype=np.uint8)).save('/tmp/warm.jpg'); doc = DocUnderstanding(doc_understanding_model_name='PaddleOCR-VL-1.6-0.9B'); doc.predict({'image': '/tmp/warm.jpg', 'query': 'Say OK.'}, max_new_tokens=8); import os; os.remove('/tmp/warm.jpg')"
+RUN python -u <<'PY'
+import sys
+import traceback
+
+import numpy as np
+from PIL import Image
+
+print("Importing paddleocr...", flush=True)
+from paddleocr import DocUnderstanding
+
+try:
+    print("Saving a throwaway warm-up image...", flush=True)
+    Image.fromarray(np.full((64, 64, 3), 255, dtype=np.uint8)).save("/tmp/warm.jpg")
+
+    print("Constructing PaddleOCR-VL-1.6 pipeline (downloads weights on first use)...", flush=True)
+    doc = DocUnderstanding(doc_understanding_model_name="PaddleOCR-VL-1.6-0.9B")
+
+    print("Running a warm-up prediction...", flush=True)
+    doc.predict({"image": "/tmp/warm.jpg", "query": "Say OK."}, max_new_tokens=8)
+    print("PaddleOCR-VL-1.6 warm-up succeeded.", flush=True)
+except Exception:
+    print("PaddleOCR-VL-1.6 warm-up FAILED:", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
+finally:
+    import os
+
+    if os.path.exists("/tmp/warm.jpg"):
+        os.remove("/tmp/warm.jpg")
+PY
 
 COPY src/backend/app ./app
 COPY --from=frontend-build /frontend/dist ./static

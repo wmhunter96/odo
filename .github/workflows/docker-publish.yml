@@ -50,6 +50,13 @@ jobs:
       # Add linux/arm64 here later if there's ever a reason to.
       - name: Build and push
         uses: docker/build-push-action@v6
+        env:
+          # BuildKit's default "auto" progress mode can collapse/truncate a
+          # RUN step's own stdout/stderr in the Actions log, down to just
+          # the final "did not complete successfully: exit code: 1" summary
+          # -- with none of the actual Python traceback that explains why.
+          # "plain" streams everything, uncollapsed.
+          BUILDKIT_PROGRESS: plain
         with:
           context: .
           platforms: linux/amd64
