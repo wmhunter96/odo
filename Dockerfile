@@ -47,14 +47,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BUILD_DATE=${BUILD_DATE} \
     PADDLE_PDX_CACHE_HOME=/app/.paddlex
 
-# libgl1/libsm6/libxext6/libxrender1: runtime libs opencv-contrib-python
-# (pulled in by paddleocr -- see requirements.txt) links against even
-# though nothing here ever opens a GUI window; it's built as a full,
-# non-headless OpenCV, unlike the opencv-python-headless this replaced.
+# libgl1/libglib2.0-0/libsm6/libxext6/libxrender1: runtime libs
+# opencv-contrib-python (pulled in by paddleocr -- see requirements.txt)
+# links against even though nothing here ever opens a GUI window; it's
+# built as a full, non-headless OpenCV, unlike the opencv-python-headless
+# this replaced. libglib2.0-0 in particular (providing libgthread-2.0,
+# libgobject-2.0, libgio-2.0) is easy to assume is only a headless-build
+# leftover and drop -- confirmed the hard way that it's still required:
+# `import cv2` fails at container build with "libgthread-2.0.so.0: cannot
+# open shared object file" without it.
 # libgomp1: OpenMP, used by paddlepaddle's CPU inference kernels.
 # curl: used by the container HEALTHCHECK.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
+        libglib2.0-0 \
         libsm6 \
         libxext6 \
         libxrender1 \
