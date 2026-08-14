@@ -57,6 +57,13 @@ jobs:
           # -- with none of the actual Python traceback that explains why.
           # "plain" streams everything, uncollapsed.
           BUILDKIT_PROGRESS: plain
+          # docker/build-push-action's newer "build summary" job-summary
+          # feature shows a Dockerfile-source annotation panel around a
+          # failing instruction instead of -- and in a way that can bury or
+          # replace -- the actual raw, streamed step log with the real
+          # stdout/traceback. Disabled so the run log stays the plain
+          # scrolling terminal output it always used to be.
+          DOCKER_BUILD_SUMMARY: false
         with:
           context: .
           platforms: linux/amd64
