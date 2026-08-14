@@ -67,6 +67,18 @@ def test_pipeline_is_configured_with_all_three_preprocessing_flags():
     assert mock_cls.call_args.kwargs["ocr_version"] == "PP-OCRv6"
 
 
+def test_mkldnn_is_disabled():
+    # Confirmed directly against a real install: PP-OCRv6's detection
+    # model isn't yet on paddlex's oneDNN blocklist and throws a
+    # NotImplementedError under it on real predictions (construction
+    # alone succeeds, masking the bug until the first real photo).
+    ctx, mock_cls = _install_fake_paddleocr([_fake_page([], [], [])])
+    with ctx:
+        PaddleOCRProvider().read(_blank_image())
+
+    assert mock_cls.call_args.kwargs["enable_mkldnn"] is False
+
+
 def test_engine_is_built_once_and_reused_across_calls():
     ctx, mock_cls = _install_fake_paddleocr([_fake_page([], [], [])])
     with ctx:

@@ -56,6 +56,21 @@ def _get_engine() -> Any:
                     use_doc_orientation_classify=True,
                     use_doc_unwarping=True,
                     use_textline_orientation=True,
+                    # PP-OCRv6's detection model isn't yet on paddlex's
+                    # MKLDNN_BLOCKLIST (the list of models known to break
+                    # under oneDNN-accelerated CPU inference) as of
+                    # paddlex 3.7.2 -- PP-OCRv6 is new enough that gap
+                    # hasn't caught up yet. Left on its default (auto-
+                    # enabled when available), construction succeeds but
+                    # every real prediction throws "NotImplementedError:
+                    # ConvertPirAttribute2RuntimeAttribute not support
+                    # [pir::ArrayAttribute<pir::DoubleAttribute>]" deep in
+                    # paddle's oneDNN executor -- confirmed directly
+                    # against a real install, not a guess. Costs some CPU
+                    # inference speed; worth revisiting once paddlex ships
+                    # a version with PP-OCRv6 properly blocklisted (or
+                    # fixed) upstream.
+                    enable_mkldnn=False,
                 )
     return _engine
 
@@ -104,12 +119,9 @@ class PaddleOCRProvider(OCRProvider):
 
         # Joined one-line-per-OCRWord, in the reading order PaddleOCR
         # already sorted them into (top-to-bottom, then left-to-right --
-        # see SortQuadBoxes upstream) -- this is what lets receipt_parser's
-        # line-oriented patterns (splitlines(), adjacent-line bridging)
-        # work unmodified regardless of which engine produced the text.
-        # _line_confidence_at() in receipt_parser.py relies on this exact
-        # "words joined 1:1 by newlines" invariant to map a regex match
-        # back to the OCR confidence it came from.
+        # see SortQuadBoxes upstream). Odometer_parser.py's anchor-based
+        # text search relies on this reading order to make sense of a
+        # dashboard's multiple numbers.
         text = "\n".join(w.text for w in words)
         mean_conf = (sum(w.confidence for w in words) / len(words)) if words else None
         return OCRResult(text=text, words=words, mean_confidence=mean_conf)

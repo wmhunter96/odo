@@ -111,6 +111,11 @@ try:
         use_doc_orientation_classify=True,
         use_doc_unwarping=True,
         use_textline_orientation=True,
+        # See the matching comment in paddle_provider.py -- PP-OCRv6's
+        # detection model isn't yet on paddlex's oneDNN blocklist, and
+        # crashes under it with a real prediction (not just here at
+        # warm-up). Must match paddle_provider.py's construction exactly.
+        enable_mkldnn=False,
     )
     print("Running a warm-up prediction...", flush=True)
     ocr.predict(np.full((64, 64, 3), 255, dtype=np.uint8))
