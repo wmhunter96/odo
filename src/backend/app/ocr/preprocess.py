@@ -2,8 +2,26 @@
 
 Kept as small, composable, pure-image-in/image-out functions so individual
 steps can be reordered, skipped, or tuned without touching the OCR engine or
-parsers. Everything here runs on CPU with Pillow + OpenCV (headless), no
-GPU and no network access required.
+parsers. Everything here runs on CPU with Pillow + OpenCV, no GPU and no
+network access required.
+
+Deliberately minimal. This used to include a fair amount of Tesseract-
+specific tuning -- an exact-width resize grid-searched against Tesseract's
+page-segmentation modes, Otsu binarization to pure black/white, a
+dashboard-specific deskew + CLAHE contrast pass -- all retired when the
+OCR engine moved to PaddleOCR (see paddle_provider.py). None of that
+transfers: PaddleOCR's own pipeline already does document-orientation
+classification, document unwarping, and per-line text-orientation
+correction, and its quad-based text detector (each detected line gets its
+own perspective-corrected crop before recognition) tolerates in-photo
+skew and uneven lighting far better than Tesseract's line-bounding-box
+approach did -- which is exactly what that retired tuning existed to work
+around. Aggressive binarization in particular tends to hurt a deep model
+more than it helps, since it throws away the gradients/texture the model
+was actually trained on. Add custom preprocessing back only where testing
+against real photos proves PaddleOCR's own pipeline isn't enough --
+see git history for what was tried and retired for Tesseract; none of it
+should be assumed to carry over to a different engine's failure modes.
 """
 from __future__ import annotations
 
@@ -14,30 +32,6 @@ import numpy as np
 from PIL import Image, ImageOps
 
 MAX_DIMENSION = 2200
-# Tuned via a quantitative grid search against a real photographed
-# receipt, scored against its known-correct manual transcription (through
-# this exact function, not a reimplementation -- an earlier pass here
-# tuned against a hand-rolled cv2 pipeline that resized before converting
-# to grayscale, which turned out to behave differently enough from this
-# actual PIL-then-grayscale order to invalidate its numbers). 900px wide +
-# Otsu binarization + denoise strength 10 got gallons, price, total, AND
-# date all correct simultaneously, and did so across multiple PSM modes
-# (see routes/ocr.py) -- the more PSM-independent a width is, the more
-# likely it generalizes to receipts other than the one it was tuned on.
-# Used as an exact target (see resize_to_width), not just a floor.
-#
-# Re-tuned after switching to the "best" (not "fast") Tesseract English
-# model -- see tesseract_provider.py -- which changes what each width
-# gets right. 900 still wins for gallons/price/total/date with the new
-# model too.
-MIN_RECEIPT_WIDTH = 900
-# Second pass, tried only when the primary pass doesn't find an address --
-# a wider crop recovers small punctuation (a zip code's digits) better in
-# practice, at the cost of it more often losing the exact time-of-day. See
-# routes/ocr.py for how the two passes get merged. 1200 (not the "fast"-
-# model-era 1800) is what actually recovers the address with the "best"
-# model -- re-verified directly, not carried over by assumption.
-WIDE_RECEIPT_WIDTH = 1200
 
 
 def load_image(data: bytes) -> Image.Image:
@@ -54,30 +48,6 @@ def downscale(img: Image.Image, max_dimension: int = MAX_DIMENSION) -> Image.Ima
         return img
     scale = max_dimension / longest
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
-
-
-def resize_to_width(img: Image.Image, width: int) -> Image.Image:
-    """Scale a receipt crop to an exact target width (both up and down --
-    the grid search behind MIN_RECEIPT_WIDTH found a specific sweet spot,
-    not just a floor, so a crop that's naturally already wider than the
-    target is deliberately brought back down to it too). Used to build a
-    receipt variant at a given width from an already-cropped image,
-    without repeating crop detection -- see prepare_receipt_variant()."""
-    w, h = img.size
-    if w == width:
-        return img
-    scale = width / w
-    return img.resize((max(1, width), max(1, int(h * scale))), Image.LANCZOS)
-
-
-def prepare_receipt_variant(cropped_receipt: Image.Image, width: int) -> Image.Image:
-    """Build an OCR-ready receipt image at a specific target width from an
-    already-cropped receipt (crop_to_receipt()'s output). Different widths
-    genuinely favor different fields on the same receipt (finer print
-    detail vs. more legible small punctuation like a zip code), so the
-    caller may run OCR against more than one variant and merge whichever
-    fields each finds -- see routes/ocr.py."""
-    return binarize_for_receipt(resize_to_width(cropped_receipt, width))
 
 
 def _trim_margin(img: Image.Image, x_pct: float = 0.04, y_pct: float = 0.01) -> Image.Image:
@@ -100,34 +70,6 @@ def _to_cv(img: Image.Image) -> np.ndarray:
 
 def _to_pil(mat: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(mat, cv2.COLOR_BGR2RGB))
-
-
-def deskew(img: Image.Image) -> Image.Image:
-    """Correct small rotation offsets (a few degrees) common in handheld
-    photos, using the minimum-area bounding box of dark pixels."""
-    mat = _to_cv(img)
-    gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bitwise_not(gray)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    coords = cv2.findNonZero(thresh)
-    if coords is None or len(coords) < 20:
-        return img
-    angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45:
-        angle = -(90 + angle)
-    else:
-        angle = -angle
-    # Only correct small skew; large "angles" usually mean the heuristic
-    # picked up noise rather than real rotation.
-    if abs(angle) < 0.5 or abs(angle) > 15:
-        return img
-    (h, w) = mat.shape[:2]
-    center = (w // 2, h // 2)
-    m = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(
-        mat, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
-    )
-    return _to_pil(rotated)
 
 
 def _order_corners(pts: np.ndarray) -> np.ndarray:
@@ -241,52 +183,8 @@ def crop_to_receipt(img: Image.Image) -> Image.Image:
     return _trim_margin(_to_pil(cropped))
 
 
-def grayscale_contrast(img: Image.Image) -> Image.Image:
-    """Grayscale + adaptive contrast boost + light denoise. Suited to
-    photos of illuminated dashboard displays: uneven lighting, glare, and
-    a colored background behind the digits."""
-    mat = _to_cv(img)
-    gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    gray = cv2.fastNlMeansDenoising(gray, h=10)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-    return Image.fromarray(gray)
-
-
-def binarize_for_receipt(img: Image.Image) -> Image.Image:
-    """Grayscale + denoise + threshold to pure black/white. Printed (often
-    thermal) receipts are small, dense text on an already high-contrast
-    background -- CLAHE tends to blotch that print into gray mush, while
-    binarization is the standard, much more reliable preprocessing for
-    Tesseract on document/receipt text.
-
-    Global Otsu thresholding (not adaptive/local thresholding) and a
-    stronger denoise pass (h=10, not 7) both came directly out of the grid
-    search referenced on MIN_RECEIPT_WIDTH -- adaptive thresholding was
-    actually *worse* here once the image is already tightly cropped to
-    just the receipt, since there's no more lighting gradient across the
-    frame for it to compensate for.
-
-    A small white border is added at the end -- Tesseract's own
-    documentation recommends a sensible border, since text running right up
-    against the image edge can be misread. It made no measurable difference
-    on the specific receipt this pipeline was tuned against (already had
-    margin from _trim_margin), but it's effectively free and protects
-    against tighter crops on other receipts, so it stays in regardless.
-    """
-    mat = _to_cv(img)
-    gray = cv2.cvtColor(mat, cv2.COLOR_BGR2GRAY)
-    gray = cv2.fastNlMeansDenoising(gray, h=10)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    bordered = cv2.copyMakeBorder(thresh, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
-    return Image.fromarray(bordered)
-
-
 def crop_receipt_from_bytes(data: bytes) -> Image.Image:
-    """load -> orient -> downscale -> crop to the receipt's outline. The
-    shared first half of the receipt pipeline, split out so a caller that
-    wants more than one binarized variant (see prepare_receipt_variant())
-    doesn't have to repeat crop detection for each one."""
+    """load -> orient -> downscale -> crop to the receipt's outline."""
     return crop_to_receipt(downscale(load_image(data)))
 
 
@@ -294,17 +192,18 @@ def prepare_for_ocr(data: bytes, mode: str = "odometer") -> Image.Image:
     """Full pipeline. `mode` is "odometer" (dashboard display) or "receipt"
     (printed text):
 
-        odometer: load -> orient -> downscale -> rotation-only deskew ->
-                  contrast boost
+        odometer: load -> orient -> downscale
         receipt:  load -> orient -> downscale -> crop to the receipt's
-                  outline (also corrects rotation as part of that) ->
-                  upscale back up if the crop left the print small ->
-                  binarize
+                  outline (also corrects rotation as part of that)
+
+    No contrast/binarization/rotation-only-deskew step for either mode
+    anymore (see this module's docstring) -- PaddleOCRProvider's pipeline
+    handles orientation, unwarping, and per-line skew itself, and the
+    output goes straight to it as a normal RGB image. crop_to_receipt is
+    kept for receipts specifically because it solves a different problem
+    PaddleOCR doesn't: telling the receipt apart from whatever background
+    it's sitting on, not correcting the receipt's own orientation.
     """
     if mode == "receipt":
-        return prepare_receipt_variant(crop_receipt_from_bytes(data), MIN_RECEIPT_WIDTH)
-
-    img = load_image(data)
-    img = downscale(img)
-    img = deskew(img)
-    return grayscale_contrast(img)
+        return crop_receipt_from_bytes(data)
+    return downscale(load_image(data))

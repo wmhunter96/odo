@@ -95,6 +95,8 @@ class OCRProcessResponse(BaseModel):
     fuel_total: float | None
     station_brand: str | None
     station_address: str | None
+    pump_number: int | None
+    fuel_type: str | None
     timestamp: datetime | None
     receipt_raw_text: str
 
@@ -178,7 +180,7 @@ class ImportCommitResponse(BaseModel):
 class SettingsOut(BaseModel):
     theme: str = "system"
     timezone: str = "UTC"
-    ocr_engine: str = "tesseract"
+    ocr_engine: str = "paddleocr"
 
 
 class SettingsUpdate(BaseModel):

@@ -14,6 +14,18 @@ from PIL import Image
 
 @dataclass
 class OCRWord:
+    """One recognized span of text with its bounding box and confidence.
+
+    Named "word" for historical reasons (the first provider was
+    word-granular), but the actual granularity is whatever the engine
+    naturally detects as one unit -- a line-detection engine like
+    PaddleOCR reports one OCRWord per detected text line, not per word.
+    Callers that need exact word boundaries shouldn't assume either way;
+    everything downstream (parsers) works off of `OCRResult.text` instead
+    and only uses these for confidence/position, where "roughly the right
+    line" is good enough.
+    """
+
     text: str
     confidence: float  # 0-100
     left: int
@@ -37,9 +49,11 @@ class OCRProvider(ABC):
         """Run OCR on a preprocessed PIL image and return raw text plus
         word-level boxes/confidences where the engine supports it.
 
-        `config` is passed through to the underlying engine verbatim (e.g.
-        Tesseract page-segmentation-mode flags) so callers can tune it per
-        image type without the provider interface knowing what "receipt"
-        or "odometer" mean.
+        `config` is an escape hatch for engine-specific tuning flags,
+        passed through verbatim so callers can tune per image type without
+        the provider interface knowing what "receipt" or "odometer" mean.
+        Not every engine takes one -- PaddleOCRProvider ignores it, since
+        PaddleOCR's detector finds text regions on its own rather than
+        needing a page-layout hint the way Tesseract's PSM did.
         """
         raise NotImplementedError

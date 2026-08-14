@@ -71,6 +71,10 @@ export interface OCRProcessResponse {
   fuel_total: number | null;
   station_brand: string | null;
   station_address: string | null;
+  // Extracted but not yet persisted on save -- there's no form field or
+  // FillUp column for these two yet (see receipt_parser.py).
+  pump_number: number | null;
+  fuel_type: string | null;
   timestamp: string | null;
   receipt_raw_text: string;
 

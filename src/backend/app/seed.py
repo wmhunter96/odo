@@ -7,7 +7,7 @@ from .models import Setting, Vehicle
 DEFAULT_SETTINGS = {
     "theme": "system",
     "timezone": "UTC",
-    "ocr_engine": "tesseract",
+    "ocr_engine": "paddleocr",
 }
 
 

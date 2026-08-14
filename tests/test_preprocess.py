@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from app.ocr.preprocess import crop_to_receipt, resize_to_width
+from app.ocr.preprocess import crop_to_receipt
 
 
 def _synthetic_receipt_photo(angle_deg: float = 12.0) -> tuple[Image.Image, int, int]:
@@ -78,23 +78,3 @@ def test_crop_to_receipt_ignores_small_contours():
     draw.rectangle([380, 380, 420, 420], fill=(255, 255, 255))  # 40x40 -- well under 20% of the frame
     result = crop_to_receipt(photo)
     assert result.size == photo.size
-
-
-def test_resize_to_width_scales_up_and_down_to_the_exact_target():
-    # Unlike a "floor" helper, this always lands on the requested width --
-    # used to build a second receipt OCR variant at a different width from
-    # the same crop (see prepare_receipt_variant / routes/ocr.py).
-    img = Image.new("RGB", (400, 800), (255, 255, 255))
-
-    wider = resize_to_width(img, 900)
-    assert wider.size[0] == 900
-    assert wider.size[1] == pytest.approx(1800, abs=2)  # aspect ratio preserved
-
-    narrower = resize_to_width(img, 200)
-    assert narrower.size[0] == 200
-    assert narrower.size[1] == pytest.approx(400, abs=2)
-
-
-def test_resize_to_width_is_a_noop_at_the_current_width():
-    img = Image.new("RGB", (500, 1000), (255, 255, 255))
-    assert resize_to_width(img, 500).size == (500, 1000)

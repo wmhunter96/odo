@@ -21,6 +21,20 @@ from .provider import OCRResult
 # run handles ungrouped numbers like "18442".
 _NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 
+# Many dashboards print the odometer flanked by the literal strings "ODO"
+# and "mi" (e.g. "ODO  4090mi"). Both are short, high-contrast text that
+# tends to survive OCR intact even when the surrounding numbers (speed,
+# range, clock, tire-pressure digits, gauge tick labels, ...) get misread
+# or the digit run itself gets split -- so when both anchors are present
+# this is a far stronger signal than the generic scoring below and is
+# checked first. Only the digit characters between the two anchors are
+# kept; any stray misread character OCR drops in there (e.g. a smudge read
+# as a letter) is discarded rather than treated as part of the number.
+_ODO_ANCHOR_RE = re.compile(
+    r"ODO\b[^0-9]{0,10}([0-9][0-9,.\s]{0,10}[0-9]|[0-9])[^0-9A-Za-z]{0,5}mi\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class OdometerCandidate:
@@ -57,6 +71,30 @@ def parse_odometer(result: OCRResult, previous_odometer: float | None = None) ->
     max_height = max((w.height for w in result.words), default=0) or 1
 
     seen_values: set[float] = set()
+
+    anchor_match = _ODO_ANCHOR_RE.search(text)
+    if anchor_match:
+        digits_only = re.sub(r"[^\d]", "", anchor_match.group(1))
+        if digits_only:
+            try:
+                anchor_value = float(digits_only)
+            except ValueError:
+                anchor_value = None
+            if anchor_value is not None:
+                seen_values.add(anchor_value)
+                candidates.append(
+                    OdometerCandidate(
+                        value=anchor_value,
+                        raw_text=anchor_match.group(0),
+                        # Comfortably higher than anything the generic
+                        # scoring loop below can produce (its max is
+                        # roughly 3 + 2 + 2 + 3 = 10) so this always wins
+                        # when both anchors are found.
+                        score=20.0,
+                        reasons=["found between 'ODO' and 'mi' anchors"],
+                    )
+                )
+
     for token in _iter_number_tokens(text):
         digits_only = re.sub(r"[^\d]", "", token.split(".")[0])
         has_decimal = "." in token

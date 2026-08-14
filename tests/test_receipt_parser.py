@@ -1,299 +1,154 @@
-from app.ocr.provider import OCRResult
+"""parse_receipt() now consumes a ReceiptExtraction (PaddleOCR-VL-1.6's
+parsed JSON output -- see receipt_vlm.py), not raw OCR text. These tests
+build ReceiptExtraction objects directly rather than going through the
+model, mirroring how test_receipt_vlm.py mocks the model call itself --
+each module is tested at its own seam.
+"""
 from app.ocr.receipt_parser import parse_receipt
-
-COSTCO_RECEIPT = """COSTCO WHOLESALE
-2201 S Santa Anita Ave, Arcadia, CA 91006
-
-7.591 GAL
-4.199 / GAL
-
-FUEL TOTAL
-$31.87
-
-01/10/2026
-12:42 PM
-"""
-
-CHEVRON_RECEIPT = """CHEVRON
-500 W Main St, Alhambra, CA 91801
-
-PRICE/GAL: $4.290
-GALLONS: 6.709
-TOTAL SALE $28.78
-
-10/12/2025 5:15 PM
-"""
+from app.ocr.receipt_vlm import ReceiptExtraction
 
 
-def test_parses_costco_style_receipt():
-    result = parse_receipt(OCRResult(text=COSTCO_RECEIPT))
-    assert result.gallons == 7.591
-    assert result.price_per_gallon == 4.199
-    assert result.fuel_total == 31.87
-    assert result.station_brand == "Costco"
-    assert result.timestamp is not None
-    assert result.timestamp.month == 1 and result.timestamp.day == 10 and result.timestamp.year == 2026
+def _extraction(**fields) -> ReceiptExtraction:
+    return ReceiptExtraction(raw_response="{...}", fields=fields)
 
 
-def test_parses_alternate_receipt_layout():
-    result = parse_receipt(OCRResult(text=CHEVRON_RECEIPT))
-    assert result.gallons == 6.709
-    assert result.price_per_gallon == 4.29
-    assert result.fuel_total == 28.78
-    assert result.station_brand == "Chevron"
-
-
-def test_missing_fields_produce_warnings_not_exceptions():
-    result = parse_receipt(OCRResult(text="garbled unreadable text ###"))
-    assert result.gallons is None
-    assert result.warnings
-
-
-COMPACT_PUMP_RECEIPT = """SHELL
-1200 S Baldwin Ave, Arcadia, CA 91007
-
-7.591G
-4.199/G
-
-AMOUNT DUE
-31.87
-
-08/10/2026 6:42 PM
-"""
-
-
-def test_parses_compact_pump_unit_and_amount_due():
-    result = parse_receipt(OCRResult(text=COMPACT_PUMP_RECEIPT))
-    assert result.gallons == 7.591
-    assert result.price_per_gallon == 4.199
-    assert result.fuel_total == 31.87
-    assert result.station_brand == "Shell"
-
-
-NO_DOLLAR_SIGN_RECEIPT = """QUIKTRIP
-400 E Colorado Blvd, Pasadena, CA 91101
-
-PER GAL 4.190
-8.327 GALS
-
-SUBTOTAL 34.89
-TOTAL 34.89
-
-08/10/2026 6:42 PM
-"""
-
-
-def test_total_without_dollar_sign_and_ignores_subtotal():
-    result = parse_receipt(OCRResult(text=NO_DOLLAR_SIGN_RECEIPT))
-    assert result.gallons == 8.327
-    assert result.price_per_gallon == 4.19
-    # Both SUBTOTAL and TOTAL happen to be equal here on purpose -- the
-    # real assertion is that the SUBTOTAL line doesn't get matched as if
-    # it were a plain "TOTAL" label (see the negative lookbehind).
-    assert result.fuel_total == 34.89
-
-
-# Real garbled OCR output from a photographed receipt (see git history) --
-# "INVOICE 883062" used to get mistaken for a "city, ST zip" address
-# because two consecutive uppercase letters anywhere before a 5-digit run
-# matched (here: "CE" out of "INVOICE" + "88306" out of "883062"), with no
-# comma or word-boundary requirement to rule out the middle of an unrelated
-# word. It should extract nothing rather than something wrong.
-GARBLED_RECEIPT_WITH_INVOICE_LINE = """PRO MART
-Los ANGELES, CA
-INVOICE 883062
-AUTH 979648
-REGULAR 5.4226
-PRICE/GAL $3.899
-FUEL TOTAL $ 21.14
-"""
-
-
-def test_address_does_not_false_positive_on_invoice_line():
-    result = parse_receipt(OCRResult(text=GARBLED_RECEIPT_WITH_INVOICE_LINE))
-    assert result.station_address is None
-    # The rest of the receipt should still parse fine.
-    assert result.price_per_gallon == 3.899
-    assert result.fuel_total == 21.14
-
-
-def test_address_extracts_real_city_state_zip_on_one_line():
-    receipt = "Some Station\n123 Main St, Springfield, IL 62704\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_address is not None
-    assert "62704" in result.station_address
-    assert "INVOICE" not in result.station_address
-
-
-# Independent/regional stations will never all fit in a hardcoded brand
-# list (this exact station -- "PRO MART" -- is a real example that
-# prompted moving off one entirely). The fallback instead looks for the
-# first plausible business-name line near the top of the receipt.
-INDEPENDENT_STATION_RECEIPT = """1004 S LA CIENEGA BL
-PRO MART
-XXXXXXXXX3003
-LOS ANGELES, CA
-90035
-
-REGULAR 5.422G
-PRICE/GAL $3.899
-FUEL TOTAL $ 21.14
-
-01/24/2026 4:19:59 PM
-"""
-
-
-def test_brand_falls_back_to_first_plausible_line_for_unknown_station():
-    result = parse_receipt(OCRResult(text=INDEPENDENT_STATION_RECEIPT))
-    assert result.station_brand == "PRO MART"
-
-
-def test_brand_fallback_strips_stray_ocr_edge_punctuation():
-    # A misread border/torn-edge artifact commonly shows up as a stray
-    # leading/trailing character on an otherwise-correct line.
-    receipt = "PRO MART ]\nFUEL TOTAL $ 21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_brand == "PRO MART"
-
-
-def test_gallons_recovers_from_g_unit_misread_as_trailing_digit():
-    # Real garbled OCR output: "5.422G" read as "5.4226" -- the "G" unit
-    # letter misread as a digit, right after a fuel-grade label. US pump
-    # receipts always print gallons to exactly 3 decimal places, so the
-    # 4th digit is recovered as the unit letter, not treated as more
-    # precision or left unparsed (which would previously fall through to
-    # derive_missing_fuel_value() and report a misleading "wasn't directly
-    # readable" even though it plainly is, to a human, on the receipt).
-    receipt = "REGULAR 5.4226\nPRICE/GAL $3.899\nFUEL TOTAL $ 21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.gallons == 5.422
-
-
-def test_brand_fallback_skips_address_date_and_code_lines():
-    receipt = (
-        "4aad Ss LA CIEWEGA BL\n"  # garbled street line (survives via the suffix check)
-        "XXXXXXXXX3003\n"  # masked account/reference code
-        "ai/24/2ne6 A53270231\n"  # garbled date + reference number
-        "PRO MART\n"  # the actual brand -- first line that isn't excluded
-        "INVOICE 883062\n"
-        "FUEL TOTAL $ 21.14\n"
+def test_parses_a_complete_extraction():
+    result = parse_receipt(
+        _extraction(
+            station_name="PRO MART",
+            address="1004 S LA CIENEGA BL, LOS ANGELES, CA 90035",
+            date="2026-01-24",
+            time="16:19:59",
+            pump_number=6,
+            fuel_type="REGULAR",
+            gallons=5.422,
+            price_per_gallon=3.899,
+            total=21.14,
+        )
     )
-    result = parse_receipt(OCRResult(text=receipt))
     assert result.station_brand == "PRO MART"
+    assert result.station_address == "1004 S LA CIENEGA BL, LOS ANGELES, CA 90035"
+    assert result.pump_number == 6
+    assert result.fuel_type == "Regular"
+    assert result.gallons == 5.422
+    assert result.price_per_gallon == 3.899
+    assert result.fuel_total == 21.14
+    assert result.timestamp is not None
+    assert (result.timestamp.year, result.timestamp.month, result.timestamp.day) == (2026, 1, 24)
+    assert (result.timestamp.hour, result.timestamp.minute, result.timestamp.second) == (16, 19, 59)
+    assert result.warnings == []
 
 
-def test_known_brand_takes_priority_over_fallback_heuristic():
-    # If a recognized chain name appears anywhere, prefer its canonical
-    # form over whatever line happens to be first.
-    receipt = "Fuel Stop Express\nCOSTCO WHOLESALE #123\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
+def test_known_brand_is_canonicalized():
+    result = parse_receipt(_extraction(station_name="COSTCO WHOLESALE #123", gallons=7.591))
     assert result.station_brand == "Costco"
 
 
-def test_brand_fallback_returns_none_when_nothing_plausible_found():
-    receipt = "XXXXXXXXX3003\nINVOICE 883062\nAUTH 979648\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
+def test_unknown_brand_is_passed_through_as_is():
+    result = parse_receipt(_extraction(station_name="Joe's Fuel Stop"))
+    assert result.station_brand == "Joe's Fuel Stop"
+
+
+def test_null_fields_become_none_not_zero_or_empty_string():
+    # The extraction prompt explicitly asks the model for null rather
+    # than a guessed value -- that must survive as None, not get coerced
+    # into a misleading 0 or "".
+    result = parse_receipt(
+        _extraction(
+            station_name=None,
+            address=None,
+            date=None,
+            time=None,
+            pump_number=None,
+            fuel_type=None,
+            gallons=None,
+            price_per_gallon=None,
+            total=None,
+        )
+    )
     assert result.station_brand is None
+    assert result.station_address is None
+    assert result.pump_number is None
+    assert result.fuel_type is None
+    assert result.gallons is None
+    assert result.price_per_gallon is None
+    assert result.fuel_total is None
+    assert result.timestamp is None
+    assert "date/time" in result.warnings[0]
 
 
-# Real receipt layout: street address, then store name, then a masked
-# account code, THEN city/state on one line and the zip on the very next
-# line -- not all on one line together, which the original address regex
-# required.
-SEPARATE_LINE_ADDRESS_RECEIPT = """1004 S LA CIENEGA BL
-PRO MART
-XXXXXXXXX3003
-LOS ANGELES, CA
-90035
-
-FUEL TOTAL $ 21.14
-"""
+def test_missing_keys_are_treated_the_same_as_explicit_nulls():
+    # A model response that simply omits a key (rather than including it
+    # as `null`) shouldn't behave any differently -- both mean "not read".
+    result = parse_receipt(_extraction(gallons=5.0))
+    assert result.station_brand is None
+    assert result.fuel_total is None
 
 
-def test_address_bridges_city_state_and_zip_on_separate_lines():
-    result = parse_receipt(OCRResult(text=SEPARATE_LINE_ADDRESS_RECEIPT))
-    assert result.station_address is not None
-    assert "LOS ANGELES" in result.station_address
-    assert "90035" in result.station_address
-    # The street line should get picked up too, even with the store name
-    # and masked account code sitting between it and the city/state line.
-    assert "1004" in result.station_address
-    assert "CIENEGA" in result.station_address.upper()
+def test_invalid_json_response_degrades_to_all_fields_missing():
+    extraction = ReceiptExtraction(raw_response="I cannot read this receipt clearly.", fields=None)
+    result = parse_receipt(extraction)
+    assert result.gallons is None
+    assert result.station_brand is None
+    assert result.raw_text == "I cannot read this receipt clearly."
+    assert result.warnings
+    assert "AI extraction" in result.warnings[0]
 
 
-def test_address_bridging_skips_blank_lines_between_city_state_and_zip():
-    receipt = "Some Station\n123 Main St\nSpringfield, IL\n\n62704\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_address is not None
-    assert "62704" in result.station_address
+def test_numeric_strings_are_coerced_defensively():
+    # Not the happy path (the prompt asks for plain numbers), but the
+    # model is free-text generation, not a strict API -- a stringified
+    # number or a stray "$"/comma shouldn't be silently dropped as missing.
+    result = parse_receipt(_extraction(gallons="5.422", price_per_gallon="$3.899", total="1,234.56"))
+    assert result.gallons == 5.422
+    assert result.price_per_gallon == 3.899
+    assert result.fuel_total == 1234.56
 
 
-def test_address_bridging_does_not_fire_without_a_real_zip_following():
-    # "Springfield, IL" alone, followed by unrelated content -- must not
-    # grab some other number and call it a zip.
-    receipt = "Some Station\nSpringfield, IL\nINVOICE 883062\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
+def test_non_numeric_garbage_becomes_none_rather_than_raising():
+    result = parse_receipt(_extraction(gallons="a lot", pump_number="six"))
+    assert result.gallons is None
+    assert result.pump_number is None
+
+
+def test_boolean_json_values_are_rejected_not_coerced_to_0_or_1():
+    # bool is technically an int subclass in Python/JSON -- a stray
+    # `true`/`false` must not silently become 1.0/0.0.
+    result = parse_receipt(_extraction(gallons=True, pump_number=False))
+    assert result.gallons is None
+    assert result.pump_number is None
+
+
+def test_whitespace_only_strings_are_treated_as_missing():
+    result = parse_receipt(_extraction(station_name="   ", address=""))
+    assert result.station_brand is None
     assert result.station_address is None
 
 
-# Real garbled OCR output: hour "04" misread as "94" (both digits wrong --
-# a smudged "0" reading as "9"), an invalid 12-hour-clock hour that
-# dateutil correctly refuses to parse as-is.
-def test_time_recovers_from_spurious_leading_hour_digit():
-    receipt = "01/24/2026 94:19:59 PM\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
+def test_fuel_type_is_title_cased():
+    assert parse_receipt(_extraction(fuel_type="DIESEL")).fuel_type == "Diesel"
+    assert parse_receipt(_extraction(fuel_type="premium")).fuel_type == "Premium"
+
+
+def test_pump_number_accepts_a_whole_number_float():
+    # The model is asked for a JSON integer, but a VLM can just as
+    # easily emit `6.0` for a whole-number field -- still unambiguous.
+    result = parse_receipt(_extraction(pump_number=6.0))
+    assert result.pump_number == 6
+
+
+def test_pump_number_rejects_a_fractional_float():
+    result = parse_receipt(_extraction(pump_number=6.5))
+    assert result.pump_number is None
+
+
+def test_date_without_time_still_parses_the_date():
+    result = parse_receipt(_extraction(date="2026-01-24", time=None))
     assert result.timestamp is not None
-    assert (result.timestamp.hour, result.timestamp.minute, result.timestamp.second) == (16, 19, 59)
+    assert (result.timestamp.year, result.timestamp.month, result.timestamp.day) == (2026, 1, 24)
 
 
-def test_time_with_plausible_two_digit_hour_is_not_altered():
-    # A real 2-digit hour (<=12) must be left alone -- only an
-    # out-of-range one should trigger the leading-digit-drop retry.
-    receipt = "01/24/2026 11:05:00 AM\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.timestamp is not None
-    assert result.timestamp.hour == 11
-
-
-# Real garbled OCR output: decimal point misread as a comma
-# ("PRICE/GAL $3,899" instead of "$3.899").
-def test_price_per_gallon_recovers_from_comma_decimal_misread():
-    receipt = "PRICE/GAL $3,899\nFUEL TOTAL $ 21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.price_per_gallon == 3.899
-
-
-# Real garbled OCR output: the directional prefix "S" in a street address
-# misread as "$" (a well-known OCR confusable -- the dollar sign is a
-# stylized S) -- "1004 S LA CIENEGA BL" read as "4904 $ LA CIENEGA BL".
-def test_address_recovers_directional_s_misread_as_dollar_sign():
-    receipt = "4904 $ LA CIENEGA BL\nLOS ANGELES, CA\n90035\nFUEL TOTAL $10.00\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_address is not None
-    assert "$" not in result.station_address
-    assert "S LA CIENEGA" in result.station_address
-
-
-def test_dollar_sign_fix_does_not_touch_real_currency_amounts():
-    # "$21.14" has a digit immediately after the "$" -- must not be
-    # mistaken for the isolated-token case above.
-    receipt = "1004 S LA CIENEGA BL\nLOS ANGELES, CA 90035\nFUEL TOTAL $21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_address == "1004 S LA CIENEGA BL, LOS ANGELES, CA 90035"
-    assert result.fuel_total == 21.14
-
-
-# Real garbled OCR output: "76" (a known brand in KNOWN_BRANDS) matched as
-# a substring inside an unrelated reference number ("...4532760231...")
-# because the check had no word boundaries.
-def test_known_brand_does_not_false_positive_inside_unrelated_digits():
-    receipt = "PRO MART\n01/24/2026 4532760231\nFUEL TOTAL $21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_brand != "76"
-    assert result.station_brand == "PRO MART"
-
-
-def test_known_brand_still_matches_as_a_real_standalone_word():
-    receipt = "76\n123 Main St, Springfield, IL 62704\nFUEL TOTAL $21.14\n"
-    result = parse_receipt(OCRResult(text=receipt))
-    assert result.station_brand == "76"
+def test_unparseable_date_is_treated_as_missing_not_raising():
+    result = parse_receipt(_extraction(date="not a date", time="16:19:59"))
+    assert result.timestamp is None
+    assert "date/time" in result.warnings[0]

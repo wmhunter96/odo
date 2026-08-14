@@ -178,9 +178,15 @@ export default function Settings() {
       <div className="card">
         <div className="card-title">OCR</div>
         <div className="field">
-          <label>OCR Engine</label>
-          <select value={settings?.ocr_engine ?? "tesseract"} disabled>
-            <option value="tesseract">Tesseract (local, CPU)</option>
+          <label>Odometer Photo</label>
+          <select value={settings?.ocr_engine ?? "paddleocr"} disabled>
+            <option value="paddleocr">PaddleOCR PP-OCRv6 (local, CPU)</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Receipt Photo</label>
+          <select value="paddleocr-vl" disabled>
+            <option value="paddleocr-vl">PaddleOCR-VL-1.6 (local, CPU)</option>
           </select>
         </div>
       </div>

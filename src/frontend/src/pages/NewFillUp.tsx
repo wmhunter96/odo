@@ -4,7 +4,7 @@ import PhotoCapture from "../components/PhotoCapture";
 import WarningBanner from "../components/WarningBanner";
 import { api } from "../api/client";
 import type { DuplicateCandidate, OCRProcessResponse } from "../types";
-import { formatDate, formatMoney, formatMpg, formatOdometer, toDatetimeLocalValue } from "../format";
+import { formatDate, formatMoney, formatMpg, formatOdometer, nowDatetimeLocalValue, toDatetimeLocalValue } from "../format";
 
 type Step = "odometer" | "receipt" | "confirm";
 
@@ -29,6 +29,11 @@ export default function NewFillUp() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [ocr, setOcr] = useState<OCRProcessResponse | null>(null);
   const [dupesDismissed, setDupesDismissed] = useState(false);
+  // Off by default: an uploaded (as opposed to just-taken) photo should
+  // keep whatever date/time OCR actually read off the receipt, not get
+  // silently overridden with right-now. The switch next to the date field
+  // is the explicit opt-in for "no, really, use the current time."
+  const [useCurrentDateTime, setUseCurrentDateTime] = useState(false);
   const [form, setForm] = useState<FormState>({
     timestamp: toDatetimeLocalValue(null),
     odometer: "",
@@ -44,6 +49,15 @@ export default function NewFillUp() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  function toggleUseCurrentDateTime(next: boolean) {
+    setUseCurrentDateTime(next);
+    // Toggling on snaps to "now" immediately (and handleSave() re-snaps at
+    // save time so it's accurate even if the user lingers on this screen);
+    // toggling off restores whatever OCR actually read off the receipt,
+    // not just whatever the field happened to show a moment ago.
+    updateField("timestamp", next ? nowDatetimeLocalValue() : toDatetimeLocalValue(ocr?.timestamp));
+  }
+
   async function handleOdometerContinue(file: File) {
     setOdometerFile(file);
     setStep("receipt");
@@ -57,6 +71,7 @@ export default function NewFillUp() {
     try {
       const result = await api.processOCR(odometerFile, file);
       setOcr(result);
+      setUseCurrentDateTime(false);
       setForm({
         timestamp: toDatetimeLocalValue(result.timestamp),
         odometer: result.odometer_value != null ? String(result.odometer_value) : "",
@@ -93,7 +108,11 @@ export default function NewFillUp() {
     setErrorMsg(null);
     try {
       const fd = new FormData();
-      fd.append("timestamp", new Date(form.timestamp).toISOString());
+      // Re-reads the clock right now rather than reusing whatever moment
+      // the toggle was flipped at -- the user may have spent a while on
+      // this screen adjusting other fields before hitting Save.
+      const timestamp = useCurrentDateTime ? new Date() : new Date(form.timestamp);
+      fd.append("timestamp", timestamp.toISOString());
       fd.append("odometer", form.odometer);
       fd.append("gallons", form.gallons);
       if (form.price_per_gallon) fd.append("price_per_gallon", form.price_per_gallon);
@@ -238,11 +257,25 @@ export default function NewFillUp() {
           />
         </div>
         <div className="field">
-          <label>Date &amp; Time</label>
+          <div className="field-label-row">
+            <label>Date &amp; Time</label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={useCurrentDateTime}
+                onChange={(e) => toggleUseCurrentDateTime(e.target.checked)}
+              />
+              <span className="switch-track">
+                <span className="switch-thumb" />
+              </span>
+              Use current time
+            </label>
+          </div>
           <input
             type="datetime-local"
             value={form.timestamp}
             onChange={(e) => updateField("timestamp", e.target.value)}
+            disabled={useCurrentDateTime}
           />
         </div>
         <div className="field">

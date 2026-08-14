@@ -29,7 +29,7 @@ No paid APIs. No SaaS. No Google Sheets. No cloud OCR. No subscription. No exter
 
 ## What Odo Is
 
-Odo is a small, mobile-first PWA + API for logging vehicle fill-ups without typing. Take a photo of your dashboard and a photo of your receipt; local OCR (Tesseract, running on CPU inside the container) extracts the odometer reading, gallons, price per gallon, fuel total, station, and date. You get one confirmation screen to check the numbers — every field is editable — and one tap to save.
+Odo is a small, mobile-first PWA + API for logging vehicle fill-ups without typing. Take a photo of your dashboard and a photo of your receipt; local AI (PaddleOCR PP-OCRv6 for the odometer, PaddleOCR-VL-1.6 for the receipt — both running on CPU inside the container) extracts the odometer reading, gallons, price per gallon, fuel total, station, pump number, fuel type, and date. You get one confirmation screen to check the numbers — every field is editable — and one tap to save.
 
 Everything persists under a single `/data` directory: the SQLite database, every original photo (never discarded), and your settings. Back that directory up and you've backed up the entire app.
 
@@ -38,9 +38,9 @@ Everything persists under a single `/data` directory: the SQLite database, every
 ### Core Features (MVP)
 
 - 📸 **Two-photo fill-up workflow** — odometer photo → receipt photo → OCR runs automatically → confirm → saved
-- 🧠 **Local OCR** — Tesseract running on CPU inside the container, no network calls, swappable behind a provider interface
+- 🧠 **Local AI, two specialized models** — PaddleOCR (PP-OCRv6) reads the odometer photo; PaddleOCR-VL-1.6, a vision-language document model, reads the receipt photo directly into structured fields. Both run on CPU inside the container, no network calls, no cloud API
 - 🎯 **Smart odometer parsing** — scores candidate numbers by plausible length, OCR confidence, and closeness to your last reading, instead of grabbing the first/biggest number on the dashboard
-- 🧾 **Flexible receipt parsing** — not tied to one station's layout; extracts gallons, price/gal, fuel total, date/time, brand, and address independently
+- 🧾 **Direct receipt field extraction** — not tied to one station's layout; PaddleOCR-VL-1.6 is asked for gallons, price/gal, fuel total, date/time, pump number, fuel type, brand, and address as JSON, and told to use `null` rather than guess anything it can't actually read
 - ➗ **Missing-value derivation** — if two of (gallons, price/gal, total) are known, the third is computed; nothing is invented from a single known value
 - ✅ **Validation, never blocking** — flags a lower-than-previous odometer, an MPG far outside your history, or fuel math that doesn't add up, but always lets you save anyway
 - 🔁 **Duplicate detection** — warns on likely repeat entries (same odometer/gallons/total/time window) before you save
@@ -57,7 +57,6 @@ Everything persists under a single `/data` directory: the SQLite database, every
 - Multiple vehicles, maintenance/oil-change/tire-rotation tracking
 - Registration & insurance document storage
 - Gas station recognition, mapping, and price history
-- Better/alternate local OCR models
 - Automatic image compression & station geocoding
 - Multiple users / optional authentication
 
@@ -72,17 +71,31 @@ _Add screenshots here once you've got a few fill-ups logged — dashboard, new f
 ## How It Works
 
 ```
-Odometer Photo ─┐
-                 ├─▶ Preprocess (orient / deskew / grayscale / contrast)
-Receipt Photo  ──┘         │
-                            ▼
-                     Tesseract OCR (local, CPU)
+Odometer Photo ─▶ Preprocess (orient / downscale)
                             │
                             ▼
-                  Field Parsers (odometer / receipt)
+              PaddleOCR PP-OCRv6 (local, CPU) --
+              doc-orientation classify + doc unwarping +
+              text-line orientation + detection + recognition
                             │
                             ▼
-                  Validation (odometer, MPG range, fuel math)
+                  Odometer Parser (score candidate numbers)
+                            │
+                            ▼
+Receipt Photo  ─▶ Preprocess (orient / downscale / crop to receipt)
+                            │
+                            ▼
+             PaddleOCR-VL-1.6 (local, CPU) -- a vision-language
+             document model asked directly for the receipt's fields
+             ("station_name", "gallons", "total", ... as JSON;
+             null for anything it can't actually read)
+                            │
+                            ▼
+                  Receipt Parser (type-coerce + normalize the JSON)
+                            │           │
+                            ▼           ▼
+                  Validation (odometer, MPG range,
+                  gallons × price/gal ≈ total)
                             │
                             ▼
                   Confirmation Screen (everything editable)
@@ -91,7 +104,7 @@ Receipt Photo  ──┘         │
                         SQLite + Photos
 ```
 
-The OCR engine sits behind a small provider interface (`src/backend/app/ocr/provider.py`) so Tesseract can be swapped for another local/free engine later without touching preprocessing, parsing, or the API.
+The odometer path still goes through the `OCRProvider` interface (`src/backend/app/ocr/provider.py`) -- raw text + word boxes in, a scored numeric candidate out -- so PP-OCRv6 can be swapped for another conventional OCR engine later without touching preprocessing, parsing, or the API. The receipt path is a different shape entirely (`src/backend/app/ocr/receipt_vlm.py`): the model returns already-structured JSON, not text to regex apart, so `receipt_parser.py`'s job shrank from "recover fields from OCR text via a battery of misread-recovery patterns" down to "type-coerce and validate a JSON object" -- most of the character-level judgment calls (is this digit a 5 or an S? does "GAL" here mean gallons or price-per-gallon?) now happen inside the model instead. Preprocessing is minimal on both paths -- PaddleOCR's own pipeline (and, for the receipt, the VL model's own robustness to skew/warping/lighting) handles what used to need hand-tuned image massaging for Tesseract (see git history for what that involved and why it doesn't carry over).
 
 MPG is never stored — it's always computed as `(current_odometer − previous_odometer) / current_fill-up_gallons` from the vehicle's chronological fill-up sequence, so editing a historical odometer value automatically ripples through to the affected interval.
 
@@ -243,10 +256,19 @@ cd src/backend
 python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
-# Tesseract must be installed locally for OCR routes to work outside Docker:
-#   macOS:   brew install tesseract
-#   Ubuntu:  sudo apt install tesseract-ocr
-#   Windows: https://github.com/UB-Mannheim/tesseract/wiki
+# No separate OCR engine install step -- paddleocr/paddlex/paddlepaddle are
+# plain pip dependencies (requirements.txt above). The Docker image
+# pre-downloads both models' weights at build time (see Dockerfile) so the
+# container never needs network access to do OCR/extraction; running the
+# backend locally outside Docker doesn't have that build step, so the
+# *first* request that uses each model (odometer -> PP-OCRv6, receipt ->
+# PaddleOCR-VL-1.6, a much bigger download at ~0.9B params) downloads it
+# on demand, cached under ~/.paddlex -- see PADDLE_PDX_CACHE_HOME in the
+# Dockerfile to point that elsewhere -- and needs network access to do so.
+# Every request after that is local/offline again. The VL model is also
+# noticeably slower per photo on CPU than PP-OCRv6 is; expect a real delay
+# (seconds, not milliseconds) on the receipt-photo step, more so on modest
+# hardware.
 
 DATA_DIR=./dev-data uvicorn app.main:app --reload --port 8080
 ```
@@ -296,8 +318,9 @@ src/
 │       ├── validation.py      Odometer/MPG/fuel-math sanity checks + duplicate detection
 │       ├── csv_import.py      Legacy CSV import + recalculation
 │       ├── csv_export.py      Clean CSV export
-│       ├── ocr/                Preprocessing, provider interface, Tesseract provider,
-│       │                      odometer parser, receipt parser
+│       ├── ocr/                Preprocessing, provider interface + PaddleOCR (PP-OCRv6)
+│       │                      provider, odometer parser, PaddleOCR-VL-1.6 receipt
+│       │                      extraction (receipt_vlm.py), receipt parser
 │       └── routes/            fillups, ocr, vehicles, stats, charts, settings, import/export
 └── frontend/                 Vite + React + TypeScript PWA
     └── src/

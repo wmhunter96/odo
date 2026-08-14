@@ -9,14 +9,9 @@ from ..db import get_db
 from ..deps import get_active_vehicle
 from ..ocr import get_provider
 from ..ocr.odometer_parser import parse_odometer
-from ..ocr.preprocess import (
-    MIN_RECEIPT_WIDTH,
-    WIDE_RECEIPT_WIDTH,
-    crop_receipt_from_bytes,
-    prepare_for_ocr,
-    prepare_receipt_variant,
-)
+from ..ocr.preprocess import prepare_for_ocr
 from ..ocr.receipt_parser import parse_receipt
+from ..ocr.receipt_vlm import extract_receipt_fields
 from ..schemas import DuplicateCandidateOut, OCRProcessResponse, WarningsOut
 from .fillups import ordered_fillups
 
@@ -60,29 +55,17 @@ async def process_ocr(
     odo_ocr = provider.read(odo_img)
     odo_result = parse_odometer(odo_ocr, previous_odometer=previous_odometer)
 
-    # Primary pass: tuned via a grid search against a real receipt (scored
-    # against its known-correct manual transcription) for gallons/price/
-    # total/date -- see preprocess.MIN_RECEIPT_WIDTH. --psm 4 ("a single
-    # column of variable-size text") beat the default full-page mode (3)
-    # and the uniform-block mode (6) there.
-    cropped_receipt = crop_receipt_from_bytes(receipt_bytes)
-    receipt_img = prepare_receipt_variant(cropped_receipt, MIN_RECEIPT_WIDTH)
-    receipt_ocr = provider.read(receipt_img, config="--psm 4")
-    receipt_result = parse_receipt(receipt_ocr)
-
-    # A wider crop recovers small punctuation (a zip code's digits, in
-    # particular) more reliably in the same grid search, but usually at
-    # the cost of losing the exact time-of-day -- worth the extra OCR pass
-    # only when the primary pass didn't find an address at all.
-    if receipt_result.station_address is None:
-        wide_img = prepare_receipt_variant(cropped_receipt, WIDE_RECEIPT_WIDTH)
-        wide_ocr = provider.read(wide_img, config="--psm 4")
-        wide_result = parse_receipt(wide_ocr)
-        receipt_result.station_address = wide_result.station_address
-        if wide_result.raw_text:
-            receipt_result.raw_text = (
-                f"{receipt_result.raw_text}\n\n--- wider pass, address recovery ---\n\n{wide_result.raw_text}"
-            )
+    # Receipts go through PaddleOCR-VL-1.6 (a vision-language document
+    # model) instead of the line-OCR-then-regex provider above -- it's
+    # asked directly for the receipt's fields as JSON rather than for
+    # every character on the page. See receipt_vlm.py for why, and
+    # preprocess.py for why that means less preprocessing here, not more:
+    # crop_to_receipt (background removal) is still worth doing, but no
+    # width-tuned resize/binarization pass -- the model works from the
+    # photo largely as-is.
+    receipt_img = prepare_for_ocr(receipt_bytes, mode="receipt")
+    receipt_extraction = extract_receipt_fields(receipt_img)
+    receipt_result = parse_receipt(receipt_extraction)
 
     gallons, price_per_gallon, fuel_total = validation.derive_missing_fuel_value(
         receipt_result.gallons, receipt_result.price_per_gallon, receipt_result.fuel_total
@@ -133,6 +116,8 @@ async def process_ocr(
         fuel_total=fuel_total,
         station_brand=receipt_result.station_brand,
         station_address=receipt_result.station_address,
+        pump_number=receipt_result.pump_number,
+        fuel_type=receipt_result.fuel_type,
         timestamp=receipt_result.timestamp,
         receipt_raw_text=receipt_result.raw_text,
         previous_odometer=previous_odometer,

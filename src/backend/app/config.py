@@ -22,7 +22,7 @@ class Settings:
         self.static_dir = Path(
             os.environ.get("STATIC_DIR", Path(__file__).resolve().parent.parent / "static")
         )
-        self.ocr_engine = os.environ.get("OCR_ENGINE", "tesseract")
+        self.ocr_engine = os.environ.get("OCR_ENGINE", "paddleocr")
         self.max_upload_mb = int(os.environ.get("MAX_UPLOAD_MB", "20"))
         self.thumbnail_max_px = int(os.environ.get("THUMBNAIL_MAX_PX", "480"))
         # Baked into the image at build time (see Dockerfile /

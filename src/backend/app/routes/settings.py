@@ -29,7 +29,16 @@ def get_settings(db: Session = Depends(get_db)):
     return schemas.SettingsOut(
         theme=_get(db, "theme", "system"),
         timezone=_get(db, "timezone", "UTC"),
-        ocr_engine=_get(db, "ocr_engine", "tesseract"),
+        # Reported straight from the actual running config (env-driven,
+        # see config.py), not the DB-stored copy below -- the OCR engine
+        # is a deployment choice, not a per-user preference (the dropdown
+        # this feeds is disabled/read-only in the UI), so there's no
+        # reason for it to ever drift from what's actually running. A
+        # value already stored in an existing installation's DB from
+        # before this engine swap (a leftover "tesseract") would otherwise
+        # keep displaying as such indefinitely despite PaddleOCR actually
+        # being the one processing every photo.
+        ocr_engine=app_settings.ocr_engine,
     )
 
 

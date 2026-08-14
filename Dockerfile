@@ -11,7 +11,16 @@ COPY src/frontend ./
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 2: production runtime -- Python + FastAPI + local Tesseract OCR
+# Stage 2: production runtime -- Python + FastAPI + local PaddleOCR
+#
+# Two separate local models, not one: PP-OCRv6 (odometer photo -- read one
+# number off a dashboard display) and PaddleOCR-VL-1.6 (receipt photo -- a
+# 0.9B vision-language document model asked directly for the receipt's
+# fields as JSON, see receipt_vlm.py). Both run entirely on CPU with no
+# network access at runtime; this makes for a noticeably larger image and
+# a noticeably slower build than a single conventional OCR engine would,
+# which is the deliberate tradeoff for the VL model's much better real-
+# world-photo robustness on the receipt side specifically.
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
@@ -23,6 +32,12 @@ FROM python:3.12-slim AS runtime
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 
+# PADDLE_PDX_CACHE_HOME (below) is where PaddleX caches downloaded model
+# weights -- set explicitly rather than relying on its own default of
+# "~/.paddlex", so the build-time model download further down and the
+# runtime read of it both land in the same place regardless of $HOME, and
+# so it falls under the `chown -R odo:odo /app` near the bottom without a
+# separate rule.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
@@ -30,38 +45,49 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     GIT_SHA=${GIT_SHA} \
     BUILD_DATE=${BUILD_DATE} \
-    TESSDATA_PREFIX=/usr/share/tessdata-best
+    PADDLE_PDX_CACHE_HOME=/app/.paddlex
 
-# tesseract-ocr: local, free, CPU-only OCR engine (no GPU, no network calls
-# at runtime -- the traineddata download below happens at build time, same
-# as pip/npm installs).
-# libgl1/libglib2.0-0/libgomp1: runtime libs required by opencv-python-headless
-# curl: used by the container HEALTHCHECK, and to fetch the traineddata below
-#
-# apt's tesseract-ocr-eng ships Google's "fast" (integer-quantized) English
-# model, optimized for throughput over accuracy. This app runs OCR at most a
-# few times a minute (one fill-up at a time, by a human standing at a gas
-# pump), so accuracy matters far more than shaving milliseconds -- replaced
-# with Google's "best" (float, higher-accuracy) model instead. Confirmed
-# directly against a real receipt: "best" correctly read a house number
-# ("1004") that "fast" consistently misread as "4004" across every
-# preprocessing variant tried (crop, upscale, contrast, sharpen, whitelist).
+# libgl1/libsm6/libxext6/libxrender1: runtime libs opencv-contrib-python
+# (pulled in by paddleocr -- see requirements.txt) links against even
+# though nothing here ever opens a GUI window; it's built as a full,
+# non-headless OpenCV, unlike the opencv-python-headless this replaced.
+# libgomp1: OpenMP, used by paddlepaddle's CPU inference kernels.
+# curl: used by the container HEALTHCHECK.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        tesseract-ocr \
         libgl1 \
-        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
         libgomp1 \
         curl \
-    && mkdir -p "$TESSDATA_PREFIX" \
-    && curl -fsSL -o "$TESSDATA_PREFIX/eng.traineddata" \
-        https://github.com/tesseract-ocr/tessdata_best/raw/main/eng.traineddata \
-    && chmod 644 "$TESSDATA_PREFIX/eng.traineddata" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY src/backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download every PP-OCRv6 pipeline sub-model (document orientation
+# classification, document unwarping, text detection, text-line
+# orientation, text recognition) at build time, into
+# PADDLE_PDX_CACHE_HOME above -- so the running container never needs
+# network access to do OCR, the same guarantee Tesseract's baked-in
+# traineddata gave (see git history) before this engine swap. Building
+# the pipeline AND running one prediction (not just importing the
+# package) is what actually forces every sub-model to be fetched --
+# some only load their weights lazily on first real inference call
+# rather than at construction, and skipping the predict() call here
+# would silently leave those to download on the container's first real
+# request instead, defeating the point.
+RUN python -c "import numpy as np; from paddleocr import PaddleOCR; ocr = PaddleOCR(lang='en', ocr_version='PP-OCRv6', use_doc_orientation_classify=True, use_doc_unwarping=True, use_textline_orientation=True); ocr.predict(np.full((64, 64, 3), 255, dtype=np.uint8))"
+
+# Same idea, second model: pre-download PaddleOCR-VL-1.6's weights (see
+# receipt_vlm.py -- MODEL_NAME must match this string exactly). A tiny
+# blank image and a short max_new_tokens are enough to force the download
+# and a real forward pass without spending meaningful build time actually
+# generating text -- this step exists purely to warm the weight cache, not
+# to validate output quality.
+RUN python -c "import numpy as np; from PIL import Image; from paddleocr import DocUnderstanding; Image.fromarray(np.full((64, 64, 3), 255, dtype=np.uint8)).save('/tmp/warm.jpg'); doc = DocUnderstanding(doc_understanding_model_name='PaddleOCR-VL-1.6-0.9B'); doc.predict({'image': '/tmp/warm.jpg', 'query': 'Say OK.'}, max_new_tokens=8); import os; os.remove('/tmp/warm.jpg')"
 
 COPY src/backend/app ./app
 COPY --from=frontend-build /frontend/dist ./static

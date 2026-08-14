@@ -4,7 +4,27 @@ sqlalchemy>=2.0.35,<2.1
 pydantic>=2.9,<3.0
 python-multipart>=0.0.12,<0.1
 pillow>=10.4,<12.0
-opencv-python-headless>=4.10,<5.0
-pytesseract>=0.3.13,<0.4
+# Non-headless build: paddleocr/paddlex depend on opencv-contrib-python
+# specifically (see paddle_provider.py / Dockerfile), and installing it
+# alongside opencv-python-headless is a known source of broken/conflicting
+# `cv2` installs -- this is the one OpenCV package in the environment.
+opencv-contrib-python>=4.10.0.84,<5.0
+# No extras on paddleocr itself -- the base package already unconditionally
+# depends on paddlex[ocr-core], which is everything PP-OCRv6 (odometer
+# photo, see paddle_provider.py) needs: detection, recognition, doc-
+# orientation/unwarping, text-line orientation.
+paddleocr>=3.7.0,<4.0
+# The receipt photo instead goes through PaddleOCR-VL-1.6, a vision-
+# language document model (see receipt_vlm.py) -- a different pipeline
+# (paddleocr.DocUnderstanding) needing paddlex's "multimodal" extra
+# specifically, which none of paddleocr's own named extras happen to pull
+# in (they're aimed at document-*structure* parsing -- tables/formulas/
+# layout -- not open-ended field extraction). Depending on paddlex
+# directly for just that extra, alongside plain paddleocr above, is the
+# straightforward way to get both feature sets from the one shared
+# paddlex install pip resolves underneath them -- version-bounded to
+# match what this paddleocr release itself requires.
+paddlex[multimodal]>=3.7.0,<3.8.0
+paddlepaddle>=3.3.0,<4.0
 python-dateutil>=2.9,<3.0
 tzdata>=2024.1
